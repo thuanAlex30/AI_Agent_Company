@@ -1,0 +1,24 @@
+story,api,table,test,ui
+US-OWN-01,GET /api/departments/overview,"departments,budgets,debts",overview.test.js,tab-ceo
+US-SAL-01,POST /api/orders,"orders,order_items,debts,stock_moves,shipments",order-stock-debt.test.js,tab-sales
+US-SAL-01,POST /api/orders/:id/cancel,"orders,order_items,stock_moves,debts,shipments",order-stock-debt.test.js,tab-sales
+US-SAL-01,POST /api/orders/:id/refund,"orders,payments,stock_moves",order-stock-debt.test.js,tab-sales
+US-SAL-02,GET /api/sales/kpi,"orders,leads,employees",order-stock-debt.test.js,tab-sales
+US-SAL-03,POST /api/leads/:id/convert,"leads,customers,quotes,contracts,orders",order-stock-debt.test.js,tab-sales
+US-MKT-01,GET /api/marketing/roi,"campaigns,leads",roi.test.js,tab-marketing
+US-OPS-01,POST /api/stock/in|out,stock_moves,order-stock-debt.test.js,tab-ops
+US-OPS-02,PATCH /api/shipments/:id,shipments,order-stock-debt.test.js,tab-ops
+US-FIN-01,POST /api/reconcile/run,"transactions,orders,debts,payments",reconcile.test.js,tab-finance
+US-FIN-01,POST /api/transactions/import-csv,transactions,reconcile.test.js,tab-finance
+US-FIN-02,POST /api/debts/remind-all,"debts,reminder_log",payments.test.js,tab-finance
+US-FIN-03,GET /api/finance/kpis,"debts,payments,orders,expenses",payments.test.js,tab-finance
+US-FIN-04,POST /api/payments,"payments,debts",payments.test.js,tab-finance
+US-CSK-01,POST /api/cskh/chat,messages,chat-rule.test.js,tab-cskh
+US-CSK-01,POST /api/cskh/tickets,tickets,sla.test.js,tab-cskh
+US-CSK-02,GET /api/cskh/sla,tickets,sla.test.js,tab-cskh
+US-HR-01,POST /api/attendance/checkin|checkout,attendance,hr.test.js,tab-hr
+US-HR-02,GET /api/hr/payroll-preview,"employees,attendance",hr.test.js,tab-hr
+US-GOV-01,POST /api/approvals/:id/decide,approvals+target,approval.test.js,tab-legal
+US-GOV-02,GET /api/audit,audit_log,audit.test.js,tab-legal
+US-P2P-01,POST /api/purchase-orders/:id/receive,"purchase_orders,stock_moves,debts",p2p.test.js,tab-ops
+US-AI-01,POST /api/cskh/chat (rule),messages+tickets,chat-rule.test.js,tab-cskh

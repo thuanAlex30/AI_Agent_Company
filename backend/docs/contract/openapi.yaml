@@ -1,0 +1,69 @@
+openapi: 3.0.3
+info: {title: BizOps AI v6, version: 6.1.0}
+servers: [{url: http://localhost:3000}]
+paths:
+  /api/health: {get: {responses: {'200': {description: ok}}}}
+  /api/auth/login: {post: {responses: {'200': {description: jwt}}}}
+  /api/auth/refresh: {post: {responses: {'200': {description: rotate}}}}
+  /api/auth/logout: {post: {responses: {'200': {description: revoke}}}}
+  /api/auth/me: {get: {description: current user + permissions}}
+  /api/customers: {get: {}, post: {}}
+  /api/customers/{id}: {get: {}, patch: {}}
+  /api/leads: {get: {}, post: {}}
+  /api/leads/{id}/convert: {post: {}}
+  /api/quotes: {get: {}, post: {}}
+  /api/contracts: {get: {}, post: {}}
+  /api/contracts/{id}/submit-approval: {post: {}}
+  /api/orders: {get: {}, post: {parameters: [Idempotency-Key]}}
+  /api/orders/{id}/cancel: {post: {}}
+  /api/orders/{id}/refund: {post: {}}
+  /api/sales/kpi: {get: {}}
+  /api/campaigns: {get: {}, post: {}}
+  /api/marketing/roi: {get: {}}
+  /api/products: {get: {}, post: {}}
+  /api/stock/in: {post: {}}
+  /api/stock/out: {post: {}}
+  /api/ops/alerts: {get: {}}
+  /api/purchase-orders: {get: {}, post: {}}
+  /api/purchase-orders/{id}/receive: {post: {}}
+  /api/suppliers: {get: {}, post: {}}
+  /api/shipments: {get: {}, post: {}}
+  /api/shipments/{id}: {patch: {}}
+  /api/qa-checks: {get: {}, post: {}}
+  /api/sop-tasks: {get: {}, post: {}}
+  /api/transactions: {get: {}, post: {}}
+  /api/transactions/import-csv: {post: {}}
+  /api/reconcile/run: {post: {}}
+  /api/debts: {get: {}, post: {}}
+  /api/debts/{id}/remind: {post: {}}
+  /api/debts/remind-all: {post: {description: US-FIN-02 1 click}}
+  /api/payments: {post: {parameters: [Idempotency-Key]}}
+  /api/expenses: {get: {}, post: {}}
+  /api/finance/kpis: {get: {}}
+  /api/reminders: {get: {}}
+  /api/budgets: {get: {}, post: {}}
+  /api/employees: {get: {}, post: {}}
+  /api/attendance/checkin: {post: {}}
+  /api/attendance/checkout: {post: {}}
+  /api/hr/today: {get: {}}
+  /api/hr/payroll-preview: {get: {description: US-HR-02}}
+  /api/recruitments: {get: {}, post: {}}
+  /api/trainings: {get: {}, post: {}}
+  /api/cskh/chat: {post: {}}
+  /api/cskh/tickets: {get: {}, post: {}}
+  /api/cskh/tickets/{id}: {patch: {}}
+  /api/cskh/sla: {get: {}}
+  /api/cskh/csat: {get: {}}
+  /api/ratings: {post: {}}
+  /api/departments/overview: {get: {}}
+  /api/agent/brief: {get: {}}
+  /api/approvals: {get: {}, post: {}}
+  /api/approvals/{id}/decide: {post: {}}
+  /api/audit: {get: {}}
+  /api/risks: {get: {}, post: {}}
+  /api/it-incidents: {get: {}, post: {}}
+  /api/it-incidents/{id}: {patch: {}}
+  /api/it/health: {get: {}}
+  /api/product-features: {get: {}, post: {}}
+  /api/users: {get: {}, post: {}}
+  /api/users/{id}/unlock: {post: {}}

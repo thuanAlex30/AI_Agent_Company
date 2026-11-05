@@ -1,0 +1,48 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  verify-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: bizops
+          POSTGRES_PASSWORD: bizops
+          POSTGRES_DB: bizops_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - run: npm run migrate
+        working-directory: backend
+      - run: node scripts/verify.js
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+      - name: migrate postgres dialect (check syntax)
+        env:
+          PG_HOST: localhost
+          PG_USER: bizops
+          PG_PASSWORD: bizops
+          PG_DB: bizops_test
+        run: node -e "const fs=require('fs');const s=fs.readFileSync('src/db/migrations/001_init.postgres.sql','utf8');if(!s.includes('CREATE TABLE')){process.exit(1)}console.log('pg dialect file OK')"
+        working-directory: backend
+      - run: npm ci --no-audit --no-fund
+        working-directory: agent_svc
+      - run: npm test
+        working-directory: agent_svc
+      - run: node scripts/eval-chat.js
+        working-directory: agent_svc
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
