@@ -1,0 +1,67 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATABASE_PATH=/data/bizops.db
+      - JWT_SECRET=${JWT_SECRET:?dat JWT_SECRET trong .env truoc khi up}
+      - CORS_ORIGIN=http://localhost:5173,http://localhost:5174
+      - AGENT_URL=http://agent:3100
+      - AGENT_INTERNAL_KEY=${AGENT_INTERNAL_KEY:-dev-agent-key}
+      - AGENT_PUBLIC_KEY=${AGENT_PUBLIC_KEY:-dev-agent-key}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:?dat WEBHOOK_SECRET trong .env truoc khi up}
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+    depends_on:
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  agent:
+    build: ./agent_svc
+    ports:
+      - "3100:3100"
+    environment:
+      - AGENT_PORT=3100
+      - NODE_ENV=production
+      - DATABASE_PATH=/data/bizops.db
+      - AGENT_INTERNAL_KEY=${AGENT_INTERNAL_KEY:-dev-agent-key}
+      - AGENT_PUBLIC_KEY=${AGENT_PUBLIC_KEY:-dev-agent-key}
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3100/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ERP noi bo (khong public ra internet — chi bind localhost)
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Storefront public
+  storefront:
+    build: ./storefront
+    ports:
+      - "5174:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  bizops-data:

@@ -67,3 +67,14 @@ paths:
   /api/product-features: {get: {}, post: {}}
   /api/users: {get: {}, post: {}}
   /api/users/{id}/unlock: {post: {}}
+  /api/public/products: {get: {description: US-STOREFRONT-01 catalog public (published only, stock dang in/out, khong lo cost/ton so)}}
+  /api/public/products/{slug}: {get: {description: US-STOREFRONT-01 chi tiet + combo_items}}
+  /api/public/services: {get: {description: US-STOREFRONT-01 dich vu public}}
+  /api/public/services/{id}: {get: {description: US-STOREFRONT-01 chi tiet dich vu}}
+  /api/public/banners: {get: {description: US-STOREFRONT-01 hero carousel}}
+  /api/public/promotions: {get: {description: US-STOREFRONT-01 khuyen mai active}}
+  /api/public/orders: {post: {description: US-STOREFRONT-02 checkout (gia server + combo explode + idempotency), parameters: [Idempotency-Key]}}
+  /api/public/service-requests: {post: {description: US-STOREFRONT-02 dat lich teabreak chi tiet (slot/party/location/MST)}}
+  /api/public/orders/{code}: {get: {description: US-STOREFRONT-03 tra cuu 2 yeu to (ma + SDT/email hoac X-Lookup-Token), parameters: [contact, X-Lookup-Token]}}
+  /api/public/payments/webhook: {post: {description: US-STOREFRONT-03 webhook VietQR tinh (HMAC + replay + idempotency), parameters: [x-signature, x-timestamp]}}
+  /api/public/chat: {post: {description: US-STOREFRONT-04 chat public proxy sang agent_svc /public-chat}}

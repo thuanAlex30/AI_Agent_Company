@@ -8,8 +8,9 @@ const SQLITE_PATH = process.env.DATABASE_PATH || './data/bizops.db';
 const MIG_DIR = __dirname + '/migrations';
 
 async function migrate() {
-  const file = DIALECT === 'pg' ? '001_init.postgres.sql' : '001_init.sql';
-  const sql = fs.readFileSync(path.join(MIG_DIR, file), 'utf8');
+  const files = DIALECT === 'pg'
+    ? ['001_init.postgres.sql', '002_storefront.postgres.sql']
+    : ['001_init.sql', '002_storefront.sql'];
 
   if (DIALECT === 'pg') {
     const { Pool } = require('pg');
@@ -20,10 +21,15 @@ async function migrate() {
     });
     const client = await pool.connect();
     try {
-      await client.query(sql);
-      await client.query(
-        "INSERT INTO schema_migrations(version, applied_at) VALUES('001_init', CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING"
-      );
+      for (const file of files) {
+        const sql = fs.readFileSync(path.join(MIG_DIR, file), 'utf8');
+        await client.query(sql);
+        await client.query(
+          'INSERT INTO schema_migrations(version, applied_at) VALUES($1, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING',
+          [file.replace('.postgres.sql', '').replace('.sql', '')]
+        );
+        console.log('Migrated:', file);
+      }
     } finally { client.release(); await pool.end(); }
   } else {
     const Database = require('better-sqlite3');
@@ -32,13 +38,21 @@ async function migrate() {
     db.pragma('journal_mode = WAL');
     db.pragma('busy_timeout = 10000');
     db.pragma('foreign_keys = ON');
-    db.exec(sql); // exec nguyen file — giu nguyen trigger
-    db.prepare(
-      "INSERT INTO schema_migrations(version, applied_at) VALUES('001_init', CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING"
-    ).run();
+    for (const file of files) {
+      const sql = fs.readFileSync(path.join(MIG_DIR, file), 'utf8');
+      try { db.exec(sql); } catch (e) {
+        // ALTER TABLE ADD COLUMN lap lai (DB cu da migrate) -> bo qua loi duplicate column
+        if (/duplicate column/i.test(e.message)) console.log('Skip (da co cot):', file);
+        else throw e;
+      }
+      const ver = file.replace('.sql', '');
+      db.prepare(
+        "INSERT INTO schema_migrations(version, applied_at) VALUES(?, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING"
+      ).run(ver);
+      console.log('Migrated:', file);
+    }
     db.close();
   }
-  console.log('Migrated:', file);
 
   // seed dev only
   const { get } = require('../common/db');

@@ -12,6 +12,11 @@ const hrRoutes = require('./routes/hr');
 const helpdeskRoutes = require('./routes/helpdesk');
 const marketingRoutes = require('./routes/marketing');
 const overviewRoutes = require('./routes/overview');
+const publicCatalog = require('./public/catalog');
+const publicOrders = require('./public/orders');
+const publicLookup = require('./public/lookup');
+const publicWebhook = require('./public/webhook');
+const publicChat = require('./public/chat');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -22,6 +27,12 @@ app.use('/api/', apiLimiter);
 
 app.get('/api/health', (req, res) => ok(res, { status: 'up', service: 'backend', version: '6.1.0', time: new Date().toISOString() }));
 app.get('/favicon.ico', (req, res) => res.status(204).end());
+// Public storefront truoc (khong auth NV) — phai mount truoc cac router authenticate
+app.use('/api/public', publicCatalog);
+app.use('/api/public', publicOrders);
+app.use('/api/public', publicLookup);
+app.use('/api/public', publicWebhook);
+app.use('/api/public', publicChat);
 app.use('/api/auth', authRoutes);
 app.use('/api', salesRoutes);
 app.use('/api', supplyRoutes);

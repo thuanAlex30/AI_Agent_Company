@@ -22,3 +22,12 @@ US-GOV-01,POST /api/approvals/:id/decide,approvals+target,approval.test.js,tab-l
 US-GOV-02,GET /api/audit,audit_log,audit.test.js,tab-legal
 US-P2P-01,POST /api/purchase-orders/:id/receive,"purchase_orders,stock_moves,debts",p2p.test.js,tab-ops
 US-AI-01,POST /api/cskh/chat (rule),messages+tickets,chat-rule.test.js,tab-cskh
+US-STOREFRONT-01,GET /api/public/products,"products,product_prices,product_combos,stock_moves",public-read.test.js,storefront-san-pham
+US-STOREFRONT-01,GET /api/public/products/:slug,"products,product_prices,product_combos,stock_moves",public-read.test.js,storefront-chi-tiet
+US-STOREFRONT-01,GET /api/public/services,"services",public-read.test.js,storefront-dich-vu
+US-STOREFRONT-01,GET /api/public/banners|promotions,"banners,promotions",public-read.test.js,storefront-home
+US-STOREFRONT-02,POST /api/public/orders,"orders,order_items,customers,stock_moves,debts,shipments,tickets",public-write.test.js,storefront-gio-checkout
+US-STOREFRONT-02,POST /api/public/service-requests,"service_requests,customers,tickets",public-write.test.js,storefront-dich-vu-dat-lich
+US-STOREFRONT-03,GET /api/public/orders/:code,"orders,debts,shipments,order_lookup_tokens",public-write.test.js,storefront-tra-cuu
+US-STOREFRONT-03,POST /api/public/payments/webhook,"pay_webhook_logs,payments,debts,transactions",public-write.test.js,storefront-thanh-toan
+US-STOREFRONT-04,POST /api/public/chat,"messages,tickets",public-chat.test.js,storefront-chat
