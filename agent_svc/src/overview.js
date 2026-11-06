@@ -1,6 +1,6 @@
 // overview read-only cho agent_svc — tong hop 12 khoi tu DB chung (khong ghi, khong cron).
 // Moi khoi try/catch rieng — 1 khoi loi khong sap overview.
-const { todayVN } = require('./db');
+const { todayVN, sinceVN } = require('./db');
 
 async function safe(fn) {
   try { return await fn(); }
@@ -14,13 +14,13 @@ async function getOverview(conn) {
 
   out.ceo = await safe(async () => {
     const emp = await c.get("SELECT COUNT(*) c FROM employees WHERE status IN ('active','probation')");
-    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= date('now','-30 days') AND status NOT IN ('cancelled','refunded','draft')");
+    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
     const appr = await c.get("SELECT COUNT(*) c FROM approvals WHERE status='pending'");
     return { headcount: Number(emp?.c || 0), revenue30d: Number(rev?.s || 0), approvals_pending: Number(appr?.c || 0) };
   });
 
   out.sales = await safe(async () => {
-    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s, COUNT(*) co FROM orders WHERE order_date >= date('now','-30 days') AND status NOT IN ('cancelled','refunded','draft')");
+    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s, COUNT(*) co FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
     const won = await c.get("SELECT COUNT(*) c FROM leads WHERE stage='won'");
     const lost = await c.get("SELECT COUNT(*) c FROM leads WHERE stage='lost'");
     const w = Number(won?.c || 0), l = Number(lost?.c || 0);
@@ -65,7 +65,7 @@ async function getOverview(conn) {
 
   out.finance = await safe(async () => {
     const ar = await c.get("SELECT COALESCE(SUM(amount-paid),0) s FROM debts WHERE type='receivable' AND status IN ('open','overdue')");
-    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= date('now','-30 days') AND status NOT IN ('cancelled','refunded','draft')");
+    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
     const rev30 = Number(rev?.s || 0);
     const dso = rev30 > 0 ? Number(ar?.s || 0) / (rev30 / 30) : 0;
     const cash = await c.get('SELECT COALESCE(SUM(CASE WHEN debt_id IS NOT NULL THEN amount ELSE 0 END),0) thu, COALESCE(SUM(CASE WHEN expense_id IS NOT NULL THEN amount ELSE 0 END),0) chi FROM payments');
@@ -74,7 +74,7 @@ async function getOverview(conn) {
 
   out.hr = await safe(async () => {
     const total = await c.get("SELECT COUNT(*) c FROM employees WHERE status IN ('active','probation')");
-    const left = await c.get("SELECT COUNT(*) c FROM employees WHERE left_date IS NOT NULL AND left_date >= date('now','-30 days')");
+    const left = await c.get('SELECT COUNT(*) c FROM employees WHERE left_date IS NOT NULL AND left_date >= ?', [sinceVN(30)]);
     const t = Number(total?.c || 0);
     const turnover = t ? Math.round(Number(left?.c || 0) / t * 1000) / 10 : 0;
     const today = todayVN();

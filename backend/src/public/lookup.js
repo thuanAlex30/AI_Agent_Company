@@ -4,10 +4,12 @@ const express = require('express');
 const crypto = require('crypto');
 const { ok, fail } = require('../common/errors');
 const { get, all } = require('../common/db');
+const { nowISO } = require('../common/db');
+const { businessDayVN } = require('../common/db');
 const { publicLookupLimiter } = require('./limiters');
 
 const router = express.Router();
-router.use(publicLookupLimiter);
+// SEC-03/PAY-01 FIX v7: limiter GAN THEO ROUTE — router.use se dem ca webhook/orders/chat
 router.use(express.json({ limit: '100kb' }));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -36,7 +38,7 @@ async function buildTimeline(orderId, orderStatus) {
   return { steps: steps.map((s, i) => ({ key: s, done: i <= idx })), current: steps[idx], cancelled: false };
 }
 
-router.get('/orders/:code', async (req, res) => {
+router.get('/orders/:code', publicLookupLimiter, async (req, res) => {
   const t0 = Date.now();
   try {
     const code = String(req.params.code || '').slice(0, 32).trim();
@@ -49,12 +51,7 @@ router.get('/orders/:code', async (req, res) => {
       customer = await get('SELECT * FROM customers WHERE id=?', [order.customer_id]);
       if (token) {
         const h = crypto.createHash('sha256').update(token).digest('hex');
-        const row = await get("SELECT * FROM order_lookup_tokens WHERE order_id=? AND token_hash=? AND expires_at > datetime('now')", [order.id, h]);
-        // pg dialect: expires_at compare — sqlite dùng datetime('now'), pg dùng NOW(); thử cả 2
-        let row2 = row;
-        if (!row2) {
-          try { row2 = await get('SELECT * FROM order_lookup_tokens WHERE order_id=? AND token_hash=? AND expires_at > NOW()', [order.id, h]); } catch {}
-        }
+        const row2 = await get('SELECT * FROM order_lookup_tokens WHERE order_id=? AND token_hash=? AND expires_at > ?', [order.id, h, nowISO()]);
         if (row2) authed = true;
       } else if (contact) {
         const ph = (customer?.phone || '').trim();

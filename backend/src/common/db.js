@@ -28,6 +28,18 @@ function getSqlite() {
   }
   return sqliteDb;
 }
+// DB-01 + OPS-02 FIX v7: mot nguon thoi gian duy nhat — tinh o app (JS), truyen param vao SQL.
+// Khong dung datetime('now')/date('now')/strftime trong src (lint trong verify.js).
+function businessDayVN(offsetDays = 0) {
+  const v = tzVN(new Date());
+  v.setDate(v.getDate() + offsetDays);
+  return v.toISOString().slice(0, 10);
+}
+function sinceVN(days = 30) { return businessDayVN(-Math.abs(days)); }
+function nowPlusMinutesISO(min = 15) {
+  return new Date(Date.now() + min * 60000).toISOString().slice(0, 19).replace('T', ' ');
+}
+function nowISO() { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
 function getPool() {
   if (!pgPool) {
     pgPool = new Pool({
@@ -101,4 +113,4 @@ async function tx(fn) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
-module.exports = { query, get, all, run, tx, norm, nowVN, todayVN, DIALECT };
+module.exports = { query, get, all, run, tx, norm, nowVN, todayVN, businessDayVN, sinceVN, nowPlusMinutesISO, nowISO, DIALECT };

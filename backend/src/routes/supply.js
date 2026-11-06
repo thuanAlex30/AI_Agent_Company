@@ -106,7 +106,7 @@ router.get('/qa-checks', requirePerm('orders.read'), async (req, res) => {
   try { return ok(res, await all('SELECT * FROM qa_checks ORDER BY id DESC LIMIT 200')); }
   catch (e) { return fail(res, e); }
 });
-router.post('/qa-checks', requirePerm('orders.read'), async (req, res) => {
+router.post('/qa-checks', requirePerm('qa.write'), async (req, res) => {
   try {
     const r = await run('INSERT INTO qa_checks(ref_type,ref_id,result,defect,checker) VALUES(?,?,?,?,?)',
       [reqStr(req.body, 'ref_type', { enum: ['order', 'shipment', 'product'] }), req.body.ref_id, reqStr(req.body, 'result', { enum: ['pass', 'fail'] }), req.body.defect || null, req.user.username]);
@@ -118,7 +118,7 @@ router.get('/sop-tasks', requirePerm('orders.read'), async (req, res) => {
   try { return ok(res, await all('SELECT * FROM sop_tasks ORDER BY id DESC LIMIT 200')); }
   catch (e) { return fail(res, e); }
 });
-router.post('/sop-tasks', requirePerm('orders.read'), async (req, res) => {
+router.post('/sop-tasks', requirePerm('sop.write'), async (req, res) => {
   try {
     const r = await run('INSERT INTO sop_tasks(dept_code,title,owner,due_date,status) VALUES(?,?,?,?,\'todo\')',
       [req.body.dept_code || null, reqStr(req.body, 'title', { max: 300 }), req.body.owner || null, req.body.due_date || null]);

@@ -1,0 +1,234 @@
+# PROMPT — NÂNG CẤP GIAO DIỆN STOREFRONT (Web bán hàng & dịch vụ công khai)
+### Hiện đại · Hiệu ứng vừa mắt · Chạy mượt · Ổn định
+
+> **Repo:** `thuanAlex30/AI_Agent_Company` · thư mục `storefront/` (React 18 + Vite 5 + react-router-dom 6, cổng :5174)
+> **Cách dùng:** dán toàn bộ file vào Claude Code đang mở ở thư mục gốc repo. Agent làm theo 5 bước ở §9, **dừng chờ bạn xác nhận sau Bước 2 và Bước 4**.
+
+---
+
+## 1. VAI TRÒ
+
+Bạn là **Senior Frontend Engineer + UI/UX Designer** chuyên e-commerce mobile-first. Nhiệm vụ: làm lại **toàn bộ lớp giao diện** của `storefront/` để trông hiện đại, hiệu ứng tinh tế, tải nhanh, chạy mượt trên điện thoại tầm trung, và **không làm hỏng bất kỳ luồng nghiệp vụ nào đang chạy**.
+
+**Luật bất biến:**
+1. **Không đổi hợp đồng API.** Giữ nguyên mọi lời gọi trong `src/services/api.js` (`/api/public/products`, `/products/:slug`, `/services`, `/banners`, `/promotions`, `/orders`, `/service-requests`, `/orders/:code?contact=`, header `X-Lookup-Token`, `/chat`). Cần API mới → **chỉ đề xuất bằng văn bản**, không tự thêm backend.
+2. **Không thêm thư viện nặng.** Ưu tiên CSS thuần + React. Cho phép tối đa: font tự host, một thư viện icon dạng SVG tree-shakable (hoặc tự viết SVG sprite). **Cấm** framer-motion, GSAP, Bootstrap, MUI, Tailwind runtime, jQuery.
+3. **Chỉ animate `transform` và `opacity`.** Không animate `width/height/top/left/margin/box-shadow lớn` trong vòng lặp.
+4. **Tôn trọng `prefers-reduced-motion`**: tắt mọi chuyển động không thiết yếu.
+5. **Không có XSS:** cấm `dangerouslySetInnerHTML`; nội dung chat/sản phẩm luôn render dạng text. Link ngoài có `rel="noopener noreferrer"`.
+6. **Không lưu dữ liệu cá nhân** (SĐT, địa chỉ, email, lookup token) vào `localStorage`. Chỉ lưu giỏ hàng (sku + số lượng) và tùy chọn giao diện; mọi truy cập storage bọc `try/catch` và hoạt động khi storage rỗng.
+7. **Test trước khi báo xong:** `npm run build` thành công, không cảnh báo lỗi, không `console.error` khi chạy các luồng chính.
+8. **Điều gì không chạy/kiểm chứng được thì nói thẳng**, kèm lệnh để tôi tự chạy.
+
+---
+
+## 2. HIỆN TRẠNG (đã đọc mã)
+
+- ~727 dòng JSX/CSS. Một file `src/styles.css` (72 dòng) dùng token: nâu cà phê `#6F4E37`, cam `#E8762D`, nền `#FAF7F2`, viền `#eadfd3`, bo góc 12px, font `system-ui`.
+- Routes (`src/App.jsx`): `/` Home · `/san-pham` Catalog · `/san-pham/:slug` Detail · `/dich-vu` Services · `/gio` Cart · `/thanh-toan` Checkout · `/xac-nhan` Confirm · `/tra-cuu` Lookup · `/tim-kiem` Search · `/khuyen-mai` Promos · `/ho-tro` Support.
+- Thành phần: `Layout`, `ProductCard`, `ChatWidget`, toast tự viết, `store/cart.js`, `utils/format.js`.
+- Giao diện hiện tại: hero gradient + emoji, lưới 4 cột cố định, chưa có skeleton, chưa có trạng thái lỗi/rỗng chuẩn, chưa có chuyển trang, chưa có responsive tinh chỉnh, trang Promos/Support chỉ 12–13 dòng.
+- Sản phẩm mặc định là **quán cà phê / teabreak / combo / dịch vụ đặt lịch**. Có biến thể telco trong `prompts/06-*` (chỉ tham khảo).
+
+**Việc đầu tiên:** đọc lại toàn bộ `storefront/src/**`, `index.html`, `vite.config.js`, liệt kê *đúng* những gì đang có trước khi thiết kế. Không giả định.
+
+---
+
+## 3. HƯỚNG THIẾT KẾ
+
+**Phong cách:** *"Warm modern café-premium"* — ấm, sạch, nhiều khoảng thở, cảm giác cao cấp nhưng thân thiện. Không lòe loẹt, không neon, không glassmorphism nặng.
+
+### 3.1. Design tokens (đặt trong `src/styles/tokens.css`)
+
+```css
+:root{
+  /* Màu — giữ nhận diện hiện tại, mở rộng thang độ */
+  --brand-900:#3E2A1D; --brand-700:#6F4E37; --brand-500:#8A6A52; --brand-100:#F1E7DD;
+  --accent-600:#D9651F; --accent-500:#E8762D; --accent-100:#FFEBDD;
+  --bg:#FAF7F2; --surface:#FFFFFF; --surface-2:#F6F1EA;
+  --ink-900:#1A2233; --ink-600:#4B5563; --ink-400:#6B7280; --line:#EADFD3;
+  --ok:#166534; --ok-bg:#DCFCE7; --warn:#B45309; --warn-bg:#FEF3C7; --err:#B91C1C; --err-bg:#FEE2E2;
+
+  /* Kiểu chữ — thang 1.2 */
+  --font: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --fs-xs:.78rem; --fs-sm:.875rem; --fs-md:1rem; --fs-lg:1.2rem; --fs-xl:1.5rem; --fs-2xl:2rem; --fs-3xl:clamp(2rem,4vw+1rem,3.25rem);
+
+  /* Không gian & hình khối */
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:24px; --s-6:32px; --s-7:48px; --s-8:72px;
+  --r-sm:10px; --r-md:16px; --r-lg:24px; --r-pill:999px;
+  --shadow-1:0 1px 2px rgba(62,42,29,.06),0 2px 8px rgba(62,42,29,.06);
+  --shadow-2:0 6px 24px rgba(62,42,29,.12);
+
+  /* Chuyển động */
+  --ease:cubic-bezier(.2,.8,.2,1); --t-fast:150ms; --t-base:250ms; --t-slow:500ms;
+  --header-h:64px; --safe-b:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){ /* tùy chọn giai đoạn sau: bộ token tối, tương phản ≥ 4.5:1 */ }
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
+```
+
+**Font:** tự host một font có subset tiếng Việt (ví dụ Be Vietnam Pro hoặc Inter), `font-display: swap`, preload 1–2 file woff2 quan trọng, luôn có fallback `system-ui`. Không tải từ CDN ngoài.
+
+**Theming theo ngành (chuẩn bị nhân rộng):** mọi màu/bo góc/font chỉ đọc từ token ở trên và `data-theme` trên `<html>`; đổi ngành = đổi file token, không sửa component.
+
+### 3.2. Bố cục & responsive
+- Mobile-first, breakpoints: `480 / 768 / 1024 / 1280`. Container tối đa 1200px.
+- Lưới sản phẩm: `repeat(auto-fill,minmax(220px,1fr))` (2 cột trên mobile).
+- Thanh điều hướng dưới cùng trên mobile (Trang chủ · Sản phẩm · Dịch vụ · Giỏ · Tra cứu), cao ≥ 56px, `padding-bottom: var(--safe-b)`.
+- Vùng chạm ≥ 44×44px; font input ≥ 16px (tránh iOS tự zoom).
+- Không cuộn ngang trên mọi kích thước.
+
+---
+
+## 4. THÀNH PHẦN (`src/components/ui/`)
+
+Xây thư viện nhỏ dùng chung, mỗi thành phần có đủ trạng thái hover / focus-visible / active / disabled / loading:
+
+`Button` (primary, ghost, subtle, icon; có `loading`) · `Input/Select/Textarea` (nhãn nổi, lỗi inline, `aria-describedby`) · `Badge/Pill` · `Card` · `Skeleton` (shimmer bằng `transform`) · `Toast` (hàng đợi, `role="status"`, tự đóng, vuốt/ nút đóng) · `Modal/Drawer` (focus trap, đóng bằng Esc, khóa cuộn nền) · `Stepper` · `QuantityInput` · `PriceTag` (giá gốc gạch + giá sale) · `EmptyState` · `ErrorState` (có nút "Thử lại") · `Rating` · `Countdown` (flash sale, `tabular-nums`) · `Tabs` · `Accordion` (FAQ).
+
+**Icon:** SVG nội tuyến, `aria-hidden` khi trang trí; thay toàn bộ emoji dùng làm icon chức năng.
+
+---
+
+## 5. TRANG (giữ nguyên route, nâng cấp giao diện)
+
+| Trang | Yêu cầu giao diện |
+|---|---|
+| **Home** | Hero có ảnh thật/tối ưu (không emoji), tiêu đề + CTA rõ; dải danh mục nhanh; **bento grid** nổi bật (sản phẩm bán chạy, combo, dịch vụ); flash sale có countdown; khối "Vì sao chọn chúng tôi" (giao nhanh, đổi trả, thanh toán); banner từ `/banners`; footer đầy đủ. Mỗi khối có skeleton riêng. |
+| **Catalog** | Thanh lọc (danh mục, khoảng giá, sắp xếp) dạng chip cuộn ngang trên mobile + bảng lọc bên trái trên desktop; số kết quả; phân trang hoặc "Xem thêm" (không nhảy trang); trạng thái rỗng thân thiện. |
+| **Detail** | Gallery (vuốt trên mobile, thumbnail trên desktop, `aspect-ratio` cố định chống nhảy layout); chọn số lượng; combo hiển thị thành phần; nút "Thêm vào giỏ" **dính đáy màn hình** trên mobile; sản phẩm gợi ý; breadcrumb. |
+| **Services** | Thẻ dịch vụ + form đặt lịch 2 bước (chọn dịch vụ → ngày/giờ/liên hệ); chọn khung giờ dạng chip; kiểm tra `slot_time` ở tương lai ngay phía client (server vẫn là nguồn quyết định). |
+| **Cart** | Danh sách dòng có ảnh nhỏ, đổi số lượng, xóa có hoàn tác (toast "Hoàn tác" 5 giây); tổng tiền cố định ở đáy mobile; gợi ý mã khuyến mãi. |
+| **Checkout** | **Stepper 3 bước**: Thông tin → Giao nhận & thanh toán (COD / VietQR) → Xác nhận. Validate tức thì (SĐT VN `0xxxxxxxxx`/`+84…`, bắt buộc địa chỉ khi giao). Nút đặt hàng chống bấm đúp, hiển thị đang xử lý. Tóm tắt đơn cố định bên phải (desktop). |
+| **Confirm** | Hiệu ứng thành công nhẹ (tick vẽ bằng SVG stroke), **mã đơn + nút Sao chép**, nút sang Tra cứu, mã VietQR rõ nét kèm số tiền/nội dung chuyển khoản, hướng dẫn theo dõi. |
+| **Lookup** | Hai yếu tố (mã đơn + SĐT/email), timeline trạng thái đơn đẹp (đã đặt → xác nhận → đang chuẩn bị → đang giao → hoàn tất), xử lý 404 chung không tiết lộ thông tin. |
+| **Search** | Ô tìm có debounce 300ms, gợi ý nhanh, tô đậm từ khóa (bằng text node, không HTML thô), trạng thái rỗng. |
+| **Promos** | Thẻ khuyến mãi dạng coupon, hạn dùng, nút sao chép mã, countdown. |
+| **Support** | FAQ dạng Accordion, kênh liên hệ, nút mở chat. |
+| **404** | Trang riêng, có tìm kiếm và liên kết gợi ý. |
+
+---
+
+## 6. HIỆU ỨNG — "vừa mắt", không quá đà
+
+**Nguyên tắc:** chuyển động phải *giúp hiểu giao diện* (phản hồi, thứ tự, trạng thái), không để trang trí.
+
+| Hiệu ứng | Thông số |
+|---|---|
+| Hover/focus thẻ sản phẩm | nâng `translateY(-4px)` + bóng, 250ms `--ease`; ảnh zoom `scale(1.04)` trong khung `overflow:hidden` |
+| Nút | nhấn `scale(.97)` 120ms; trạng thái loading có spinner SVG xoay |
+| Hiện dần khi cuộn | `IntersectionObserver` dùng chung 1 observer; `opacity 0→1` + `translateY(16px→0)`, 500ms; so le tối đa 5 phần tử; **chỉ chạy một lần**; tắt khi reduced-motion |
+| Chuyển trang | fade 200ms (không chặn điều hướng, không giữ trang cũ trong DOM) |
+| Skeleton | shimmer bằng `transform: translateX` trên pseudo-element, 1.4s lặp, dừng khi dữ liệu về |
+| Thêm vào giỏ | badge giỏ "nảy" 300ms + toast; trên mobile có thể bay ảnh nhỏ về icon giỏ (tùy chọn, ≤ 500ms) |
+| Header | thu nhỏ nhẹ + đổ bóng khi cuộn > 8px (chỉ đổi opacity/transform của lớp nền) |
+| Drawer/Modal | trượt 250ms + lớp phủ fade; trả focus về phần tử mở |
+| Countdown | không animate số; chỉ đổi màu khi < 1 giờ |
+| Thành công đặt hàng | vẽ tick SVG `stroke-dashoffset` 600ms, một lần |
+
+**Cấm:** parallax nặng, hiệu ứng chạy vô hạn gây xao nhãng, đổ bóng động lớn, autoplay video có tiếng, carousel tự chuyển quá nhanh (nếu có thì ≥ 6s, dừng khi hover/focus, có nút tạm dừng).
+
+---
+
+## 7. CHẠY MƯỢT & ỔN ĐỊNH
+
+### 7.1. Ngân sách hiệu năng (đo bằng Lighthouse mobile, mạng "Slow 4G", CPU 4× slowdown)
+- **LCP < 2,5 s · CLS < 0,1 · INP < 200 ms · TBT < 200 ms**
+- **JS ban đầu ≤ 150 kB gzip** (build hiện tại 192 kB chưa nén; đo lại baseline trước khi sửa).
+- Điểm Lighthouse **Performance ≥ 90, Accessibility ≥ 95, Best Practices ≥ 95, SEO ≥ 90** (mobile).
+
+### 7.2. Kỹ thuật bắt buộc
+- **Chia mã theo route** bằng `React.lazy` + `Suspense` (fallback = skeleton của trang đó).
+- Ảnh: `loading="lazy"`, `decoding="async"`, **luôn có `width/height` hoặc `aspect-ratio`**, `srcset`, ưu tiên WebP/AVIF, ảnh LCP của Home dùng `fetchpriority="high"` và không lazy.
+- `React.memo` cho `ProductCard`; danh sách dài > 60 dòng dùng phân trang/“xem thêm”, không render thừa.
+- Debounce tìm kiếm; hủy request cũ bằng `AbortController` khi đổi route/đổi từ khóa.
+- Cache nhẹ trong bộ nhớ (stale-while-revalidate, TTL 60s) cho `products`, `services`, `banners`, `promotions`; **không cache** đơn hàng/tra cứu.
+- Không đọc/ghi layout lặp trong scroll handler; dùng `IntersectionObserver`, `passive: true` cho sự kiện cuộn.
+
+### 7.3. Độ ổn định
+- **Error Boundary** toàn cục + theo trang; trang lỗi có nút "Thử lại" và liên kết về trang chủ; không bao giờ màn hình trắng.
+- Mọi lời gọi GET: timeout 10 s, thử lại tối đa 2 lần với backoff (500ms, 1500ms) **chỉ cho GET**; POST **không** tự thử lại.
+- **Checkout:** sinh một `Idempotency-Key` cho mỗi lượt đặt, giữ trong bộ nhớ cho tới khi thành công; vô hiệu nút khi đang gửi; nếu mạng rớt giữa chừng, thông báo rõ và cho gửi lại **cùng khóa** (tránh tạo đơn trùng).
+- Xử lý `429` bằng thông báo thân thiện "Bạn thao tác hơi nhanh, thử lại sau X giây" (đọc `Retry-After` nếu có); xử lý `5xx` và mất mạng (banner "Bạn đang offline" khi `navigator.onLine === false`).
+- Form không mất dữ liệu khi đổi bước hoặc lỗi; giữ trạng thái trong state, không trong URL nếu là dữ liệu cá nhân.
+- Giỏ hàng đồng bộ giữa các tab (`storage` event), kiểm tra lại giá/tồn kho với server tại bước Checkout và hiển thị thay đổi nếu có.
+- **Khớp chiều cao theo `dvh`** cho bố cục toàn màn hình mobile để tránh nhảy khi thanh địa chỉ co giãn.
+
+---
+
+## 8. TRUY CẬP, SEO, BẢO MẬT GIAO DIỆN
+
+**Truy cập (WCAG 2.2 AA):** tương phản ≥ 4,5:1; `:focus-visible` rõ ràng; điều hướng bằng bàn phím toàn bộ; thứ tự focus hợp lý; landmark (`header/nav/main/footer`); nút "Bỏ qua tới nội dung"; ảnh có `alt` có nghĩa (trang trí → `alt=""`); form có `label` thật; thông báo lỗi `aria-live="polite"`; modal có focus trap; không truyền đạt thông tin chỉ bằng màu.
+
+**SEO (SPA):** `<title>` + `<meta description>` theo từng route (hook `usePageMeta`), Open Graph cơ bản, `lang="vi"`, `theme-color`, favicon, `robots.txt`; JSON-LD `Product`/`Offer` ở trang chi tiết nếu có đủ dữ liệu. Nếu muốn chia sẻ link đẹp trên Zalo/Facebook, **đề xuất** (không tự làm) prerender/SSR ở phần ghi chú cuối.
+
+**Bảo mật giao diện:**
+- ChatWidget: render tin nhắn dạng text; giới hạn độ dài input (≤ 500 ký tự); hiển thị lỗi 429/5xx dễ hiểu; **không** gợi ý/không có ô nhập "xem công nợ bằng SĐT" (nhánh này đang là lỗ hổng SEC-01 ở backend/agent — giao diện chỉ hướng khách sang trang **Tra cứu đơn**).
+- Lookup token chỉ giữ trong bộ nhớ/`sessionStorage` của phiên, **không** đặt trong URL hay `localStorage`.
+- Không in dữ liệu cá nhân ra `console`. Không để khóa/secret trong bundle.
+- Tương thích CSP chặt: không script inline, không `eval`.
+
+---
+
+## 9. QUY TRÌNH THỰC HIỆN (5 bước, có cổng dừng)
+
+**Bước 0 — Baseline (không sửa mã).** Đọc toàn bộ `storefront/`, chạy `npm ci && npm run build`, ghi kích thước bundle, chạy Lighthouse mobile cho Home/Catalog/Detail/Checkout (nếu có Chrome; nếu không, nói rõ và đưa lệnh). Xuất bảng baseline.
+
+**Bước 1 — Nền tảng thiết kế.** `tokens.css`, reset, font tự host, bộ `components/ui/*`, `usePageMeta`, `useReveal`, ErrorBoundary, lớp `services/http.js` (timeout, retry GET, AbortController, xử lý 429). Chưa đổi trang.
+
+**Bước 2 — Khung & Home + Catalog + Detail.** Layout mới (header, nav dưới mobile, footer), code-splitting, skeleton. **⛔ DỪNG: gửi ảnh chụp màn hình (mobile 390px + desktop 1440px) và số liệu Lighthouse để tôi duyệt hướng thiết kế.**
+
+**Bước 3 — Giỏ → Checkout → Confirm → Lookup → Services.** Luồng tiền: stepper, idempotency, chống bấm đúp, xử lý lỗi mạng. Viết test luồng.
+
+**Bước 4 — Search, Promos, Support, 404, ChatWidget, hoàn thiện hiệu ứng.** Rà soát reduced-motion, a11y, hiệu năng. **⛔ DỪNG: báo cáo theo mẫu §11 để tôi nghiệm thu.**
+
+**Bước 5 — Đóng gói.** Thêm job `storefront` vào `.github/workflows/ci.yml` (`npm ci` + `npm run build`, Node cố định, cache lockfile; PR bị chặn khi build lỗi), cập nhật README storefront, ghi chú nhân rộng theme theo ngành.
+
+Mỗi bước: commit nhỏ, thông điệp `feat(ui): …` / `fix(ui): …`, build xanh trước khi sang bước sau.
+
+---
+
+## 10. TIÊU CHÍ NGHIỆM THU (đo được)
+
+**Giao diện & trải nghiệm**
+- [ ] Không còn emoji dùng làm icon chức năng; toàn bộ trang dùng chung token, không màu/pixel "viết cứng" ngoài token.
+- [ ] Tất cả trang đẹp và không vỡ ở 360, 390, 768, 1024, 1440px; không cuộn ngang.
+- [ ] Mọi vùng dữ liệu có skeleton, trạng thái rỗng và trạng thái lỗi có nút "Thử lại".
+- [ ] Hiệu ứng chỉ dùng `transform/opacity`; bật `prefers-reduced-motion` thì không còn chuyển động trang trí.
+
+**Hiệu năng & ổn định**
+- [ ] Lighthouse mobile: Performance ≥ 90, A11y ≥ 95, Best Practices ≥ 95, SEO ≥ 90 trên Home, Catalog, Detail, Checkout.
+- [ ] LCP < 2,5 s, CLS < 0,1, INP < 200 ms; JS ban đầu ≤ 150 kB gzip.
+- [ ] Giả lập mạng rớt/`5xx`/`429` ở mọi lời gọi: không màn hình trắng, không mất dữ liệu form, có thông báo rõ.
+- [ ] **Test song song:** bấm "Đặt hàng" 5 lần liên tiếp → đúng **1** đơn được tạo.
+- [ ] Chuyển trang liên tục 50 lần không rò rỉ request treo (kiểm bằng tab Network/Performance).
+
+**Truy cập & bảo mật**
+- [ ] Điều hướng hoàn toàn bằng bàn phím; modal có focus trap; không lỗi axe ở mức nghiêm trọng/cao.
+- [ ] `grep -rn "dangerouslySetInnerHTML\|localStorage" storefront/src` chỉ còn các chỗ hợp lệ (giỏ hàng + tùy chọn UI, có try/catch).
+- [ ] Không có dữ liệu cá nhân/lookup token trong `localStorage` hoặc URL.
+
+**Tương thích với hệ thống**
+- [ ] Không đổi hợp đồng `/api/public/*`; luồng đặt hàng → xác nhận → tra cứu → thanh toán VietQR vẫn chạy đúng.
+- [ ] `cd storefront && npm ci && npm run build` xanh; job `storefront` trong CI xanh.
+
+---
+
+## 11. MẪU BÁO CÁO (agent phải xuất ở các điểm dừng)
+
+```markdown
+## Báo cáo BƯỚC N
+- **Đã làm:** (tệp/thành phần, commit)
+- **Bằng chứng:** (lệnh + kết quả; kích thước bundle trước/sau; điểm Lighthouse trước/sau; ảnh chụp mobile + desktop)
+- **Nghiệm thu:** từng ô §10 ✅/❌ kèm bằng chứng
+- **Chưa làm được / rủi ro:** (nói thẳng; kèm lệnh để người dùng tự chạy nếu thiếu môi trường)
+- **Đề xuất ngoài phạm vi (không tự làm):** (API mới, prerender/SSR cho SEO/chia sẻ Zalo, CDN ảnh…)
+- **Chờ xác nhận để sang bước sau.**
+```
+
+---
+
+## 12. NGOÀI PHẠM VI (không làm trong prompt này)
+Sửa backend/agent, đổi schema, thêm thanh toán mới, thêm LLM vào chat, đa ngôn ngữ, chế độ tối hoàn chỉnh, PWA/offline đầy đủ. Những mục này chỉ **ghi đề xuất** nếu gặp, để quyết định sau.

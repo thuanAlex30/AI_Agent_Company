@@ -20,6 +20,7 @@ US-HR-01,POST /api/attendance/checkin|checkout,attendance,hr.test.js,tab-hr
 US-HR-02,GET /api/hr/payroll-preview,"employees,attendance",hr.test.js,tab-hr
 US-GOV-01,POST /api/approvals/:id/decide,approvals+target,approval.test.js,tab-legal
 US-GOV-02,GET /api/audit,audit_log,audit.test.js,tab-legal
+US-GOV-03,RBAC truong phong/nhan vien (roles-permissions.json matrix + role_scopes + requirePerm + ERP an tab theo quyen),roles-permissions.json,rbac.test.js,tab-all
 US-P2P-01,POST /api/purchase-orders/:id/receive,"purchase_orders,stock_moves,debts",p2p.test.js,tab-ops
 US-AI-01,POST /api/cskh/chat (rule),messages+tickets,chat-rule.test.js,tab-cskh
 US-STOREFRONT-01,GET /api/public/products,"products,product_prices,product_combos,stock_moves",public-read.test.js,storefront-san-pham

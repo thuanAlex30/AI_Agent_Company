@@ -38,6 +38,14 @@ function getPool() {
   }
   return pgPool;
 }
+// DB-01 FIX v7: nguon thoi gian duy nhat o app (giong backend), khong dung ham date DB trong src
+function businessDayVN(offsetDays = 0) {
+  const v = tzVN(new Date());
+  v.setDate(v.getDate() + offsetDays);
+  return v.toISOString().slice(0, 10);
+}
+function sinceVN(days = 30) { return businessDayVN(-Math.abs(days)); }
+function nowISO() { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
 
 // normalize tieng Viet: NFD + map d/D (mau chuan v6.1)
 function norm(s = '') {
@@ -101,4 +109,4 @@ async function tx(fn) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
-module.exports = { query, get, all, run, tx, norm, nowVN, todayVN, DIALECT };
+module.exports = { query, get, all, run, tx, norm, nowVN, todayVN, businessDayVN, sinceVN, nowISO, DIALECT };

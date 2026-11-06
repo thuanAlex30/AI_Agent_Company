@@ -152,13 +152,11 @@ async function publicChatReply(conn, { message, contact = null, lookup_token = n
     return { reply: gS.text, intent: 'easy', category: 'easy', sources: [], needsReview: gS.needsReview, createTicket: true, ticket_id };
   }
 
-  // 0e. Khai ma KH / hoi no (ke ca "cho xem no", "khai ma") -> debt_unverified, khong lo so
+  // 0e. Hoi no / khai ma (SEC-01 FIX v7): khong xin SDT qua chat, huong sang Tra cuu 2 yeu to
   if (/(xem no|cho xem no|khai ma|ma kh|cong no|con no|du no|tra no|thieu bao nhieu|con thieu|han thanh toan)/.test(n) && !ocode) {
-    if (!verifiedContact) {
-      const reply = 'Em chào anh/chị, để tra cứu công nợ vui lòng cho em xin SĐT đã mua hàng để xác thực ạ.';
-      await logPub(c, { contentIn: message, contentOut: reply, ms: Date.now() - t0 });
-      return { reply, intent: 'debt_unverified', category: 'policy_inquiry', sources: [], needsReview: false, createTicket: false };
-    }
+    const reply = 'De bao mat cong no, em khong tra so tien qua chat a. Minh mo trang Tra cuu don, nhap ma don DHW + SDT/email da dat de xem da tra/con lai nhe.';
+    await logPub(c, { contentIn: message, contentOut: reply, ms: Date.now() - t0 });
+    return { reply, intent: 'debt_secure_redirect', category: 'policy_inquiry', sources: [], needsReview: false, createTicket: false };
   }
   // 0c. Moi du lieu (xem het don/kho/luong/list KH) -> tu choi + ticket CSKH
   if (/(xem het|tat ca don|list don|liet ke don|tong kho|ton kho chi tiet|luong nhan|danh sach khach|bao cao doanh thu|doanh thu bao nhieu)/.test(n)) {
@@ -192,7 +190,8 @@ async function publicChatReply(conn, { message, contact = null, lookup_token = n
       const crypto = require('crypto');
       const h = crypto.createHash('sha256').update(String(lookup_token)).digest('hex');
       try {
-        const row = await c.get("SELECT * FROM order_lookup_tokens WHERE order_id=? AND token_hash=? AND expires_at > datetime('now')", [order.id, h]);
+        const { nowISO } = require('../db');
+        const row = await c.get('SELECT * FROM order_lookup_tokens WHERE order_id=? AND token_hash=? AND expires_at > ?', [order.id, h, nowISO()]);
         if (row) tokenOk = true;
       } catch {}
     }
@@ -211,32 +210,13 @@ async function publicChatReply(conn, { message, contact = null, lookup_token = n
     return { reply: g.text, intent: 'lookup', category: 'policy_inquiry', sources: chunks.map((x) => x.source), needsReview: g.needsReview, createTicket: false, order_code: order.code };
   }
 
-  // 2. Hỏi nợ cá nhân — bắt buộc xác thực
-  if (/(cong no|con no|du no|tra no|thieu bao nhieu|con thieu|han thanh toan)/.test(n) && /(cua toi|cua minh|giup toi|xem|tra cuu|kiem tra|don|sdt|so dien thoai)/.test(n)) {
-    if (!verifiedContact) {
-      const reply = 'Em chào anh/chị, để tra cứu công nợ vui lòng cho em xin SĐT đã mua hàng để xác thực ạ.';
-      await logPub(c, { contentIn: message, contentOut: reply, ms: Date.now() - t0 });
-      return { reply, intent: 'debt_unverified', category: 'policy_inquiry', sources: [], needsReview: false, createTicket: false };
-    }
-    const cust = await findCustomerByContact(c, verifiedContact);
-    if (!cust) {
-      const reply = 'Em không tìm thấy SĐT này trong hệ thống ạ. Mình kiểm tra lại giúp em nhé.';
-      await logPub(c, { contentIn: message, contentOut: reply, ms: Date.now() - t0 });
-      return { reply, intent: 'debt', category: 'policy_inquiry', sources: [], needsReview: false, createTicket: false };
-    }
-    const rows = await c.query("SELECT * FROM debts WHERE customer_id=? AND type='receivable' AND status IN ('open','overdue') ORDER BY due_date", [cust.id]);
-    if (!rows.length) {
-      const reply = `Em kiểm tra SĐT đã xác thực không còn công nợ mở nào ạ.` + cite;
-      await logPub(c, { contentIn: message, contentOut: reply, ms: Date.now() - t0 });
-      return { reply, intent: 'debt', category: 'policy_inquiry', sources: chunks.map((x) => x.source), needsReview: false, createTicket: false };
-    }
-    const total = rows.reduce((s, d) => s + (Number(d.amount) - Number(d.paid)), 0);
-    const wl = new Set();
-    for (const d of rows) { wl.add(Number(d.amount)); wl.add(Number(d.amount) - Number(d.paid)); }
-    let reply = `Em tra cứu SĐT đã xác thực: còn ${rows.length} khoản, tổng còn lại ${total.toLocaleString('vi-VN')}đ.` + cite;
-    const g = guardPublic(reply, wl);
-    await logPub(c, { contentIn: message, contentOut: g.text, ms: Date.now() - t0 });
-    return { reply: g.text, intent: 'debt', category: 'policy_inquiry', sources: chunks.map((x) => x.source), needsReview: g.needsReview, createTicket: false };
+  // 2. Hoi no ca nhan (SEC-01 FIX v7): KENH CONG KHAI KHONG BAO GIO TRA SO TIEN.
+  // Chi huong sang trang Tra cuu (2 yeu to: ma DHW + SDT/email) hoac lookup_token.
+  // Khong query debts, khong goi findCustomerByContact o kenh public.
+  if (/(cong no|con no|du no|tra no|thieu bao nhieu|con thieu|han thanh toan|khai ma|ma kh|xem no|cho xem no)/.test(n) && !ocode) {
+    const reply = 'De bao mat cong no, em khong tra so tien qua chat a. Minh mo trang Tra cuu don, nhap ma don DHW + SDT/email da dat de xem da tra/con lai nhe.';
+    await logPub(c, { contentIn: message, contentOut: reply, ms: Date.now() - t0 });
+    return { reply, intent: 'debt_secure_redirect', category: 'policy_inquiry', sources: [], needsReview: false, createTicket: false };
   }
 
   // 3. Chính sách hỏi thông tin (không ticket) — trước khiếu nại để "chính sách đổi trả thế nào" không thành complaint

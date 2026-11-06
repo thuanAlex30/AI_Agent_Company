@@ -5,7 +5,7 @@ const request = require('supertest');
 const app = require('../server');
 const pub = require('../src/brain/public');
 
-const KEY = process.env.AGENT_PUBLIC_KEY || process.env.AGENT_INTERNAL_KEY || 'dev-agent-key';
+const KEY = process.env.AGENT_PUBLIC_KEY;
 
 test('pub-chat1: OK menu/gia + trich nguon', async () => {
   const r = await request(app).post('/public-chat').set('x-agent-key', KEY).send({ message: 'Menu có gì? giá cà phê sữa bao nhiêu?' });

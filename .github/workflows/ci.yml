@@ -1,7 +1,120 @@
 name: CI
 on: [push, pull_request]
 jobs:
-  verify-test:
+  backend-sqlite:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ matrix.node }} }
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - run: npm run migrate
+        working-directory: backend
+      - run: npm run seed:storefront
+        working-directory: backend
+      - run: node scripts/verify.js
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+  backend-postgres:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: bizops
+          POSTGRES_PASSWORD: bizops
+          POSTGRES_DB: bizops_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ matrix.node }} }
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - run: npm run migrate
+        working-directory: backend
+        env:
+          PG_HOST: localhost
+          PG_USER: bizops
+          PG_PASSWORD: bizops
+          PG_DB: bizops_test
+      - run: npm run seed:storefront
+        working-directory: backend
+        env:
+          PG_HOST: localhost
+          PG_USER: bizops
+          PG_PASSWORD: bizops
+          PG_DB: bizops_test
+      - run: node scripts/verify.js
+        working-directory: backend
+        env:
+          PG_HOST: localhost
+          PG_USER: bizops
+          PG_PASSWORD: bizops
+          PG_DB: bizops_test
+      - run: npm test
+        working-directory: backend
+        env:
+          PG_HOST: localhost
+          PG_USER: bizops
+          PG_PASSWORD: bizops
+          PG_DB: bizops_test
+  agent:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ matrix.node }} }
+      - run: npm ci --no-audit --no-fund
+        working-directory: agent_svc
+      - run: npm test
+        working-directory: agent_svc
+      - run: node scripts/eval-chat.js
+        working-directory: agent_svc
+      - run: node scripts/eval-public-chat.js
+        working-directory: agent_svc
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+  storefront:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci --no-audit --no-fund
+        working-directory: storefront
+      - run: npm run build
+        working-directory: storefront
+      # Ngan sach bundle (spec §7.1): JS ban dau <= 150 kB gzip.
+      # Chan regression kich thuoc bundle ngay trong CI.
+      - run: node scripts/check-bundle.cjs
+        working-directory: storefront
+  storefront-e2e:
+    # E2E: 5 lan gui cung Idempotency-Key -> chi tao 1 don (spec §7.3).
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -22,27 +135,39 @@ jobs:
         with: { node-version: 20 }
       - run: npm ci --no-audit --no-fund
         working-directory: backend
+      - run: npm ci --no-audit --no-fund
+        working-directory: storefront
       - run: npm run migrate
         working-directory: backend
-      - run: node scripts/verify.js
-        working-directory: backend
-      - run: npm test
-        working-directory: backend
-      - name: migrate postgres dialect (check syntax)
         env:
           PG_HOST: localhost
           PG_USER: bizops
           PG_PASSWORD: bizops
           PG_DB: bizops_test
-        run: node -e "const fs=require('fs');const s=fs.readFileSync('src/db/migrations/001_init.postgres.sql','utf8');if(!s.includes('CREATE TABLE')){process.exit(1)}console.log('pg dialect file OK')"
+      - run: npm run seed:storefront
         working-directory: backend
-      - run: npm ci --no-audit --no-fund
-        working-directory: agent_svc
-      - run: npm test
-        working-directory: agent_svc
-      - run: node scripts/eval-chat.js
-        working-directory: agent_svc
-      - run: npm ci --no-audit --no-fund
-        working-directory: frontend
-      - run: npm run build
-        working-directory: frontend
+        env:
+          PG_HOST: localhost
+          PG_USER: bizops
+          PG_PASSWORD: bizops
+          PG_DB: bizops_test
+      - name: Start backend
+        working-directory: backend
+        env:
+          PG_HOST: localhost
+          PG_USER: bizops
+          PG_PASSWORD: bizops
+          PG_DB: bizops_test
+          PORT: 3000
+        run: |
+          node src/server.js &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/api/public/products?limit=1 > /dev/null; then
+              echo "backend san sang"; exit 0
+            fi
+            sleep 1
+          done
+          echo "backend khong khoi dong"; exit 1
+      - name: E2E idempotency (5 lan gui -> 1 don)
+        working-directory: storefront
+        run: node scripts/e2e-idempotency.cjs http://127.0.0.1:3000

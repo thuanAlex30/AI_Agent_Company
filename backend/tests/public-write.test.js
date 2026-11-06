@@ -106,24 +106,45 @@ test('p3a: tra cuu 2 yeu to (ma + SDT) + token', async () => {
   assert.equal(ok2.body.data.code, ORDER.code);
 });
 
-test('p3b: webhook HMAC + idempotency + khong double-count (I5)', async () => {
+test('p3b: webhook HMAC byte-tho + timestamp bat buoc + idempotency + khong double-count (I5, PAY-01 v7)', async () => {
   const secret = process.env.WEBHOOK_SECRET;
   const ref = 'P2P3-' + Date.now();
   // lay remain hien tai de webhook tra dung so
   const cur = await request(app).get(`/api/public/orders/${ORDER.code}?contact=${PHONE}`).expect(200);
   const remain = Number(cur.body.data.remain);
   assert.ok(remain > 0, 'don P2 con du de test webhook');
-  const body = { bank_ref: ref, order_code: ORDER.code, amount: remain, provider: 'vietqr', timestamp: Math.floor(Date.now() / 1000) };
-  const sig = crypto.createHmac('sha256', secret).update(JSON.stringify(body)).digest('hex');
+  const ts = String(Math.floor(Date.now() / 1000));
+  const body = { bank_ref: ref, order_code: ORDER.code, amount: remain, provider: 'vietqr' };
+  const raw = JSON.stringify(body);
+  const sig = crypto.createHmac('sha256', secret).update(`${ts}.`).update(raw).digest('hex');
   const r1 = await request(app).post('/api/public/payments/webhook')
-    .set('x-signature', sig).set('x-timestamp', String(body.timestamp)).send(body).expect(200);
+    .set('x-signature', sig).set('x-timestamp', ts)
+    .set('Content-Type', 'application/json').send(raw).expect(200);
   assert.equal(r1.body.ok, true);
   // replay cung bank_ref -> deduped
   const r2 = await request(app).post('/api/public/payments/webhook')
-    .set('x-signature', sig).set('x-timestamp', String(body.timestamp)).send(body).expect(200);
+    .set('x-signature', sig).set('x-timestamp', ts)
+    .set('Content-Type', 'application/json').send(raw).expect(200);
   assert.equal(r2.body.data.deduped, true, 'replay phai deduped');
+  // thieu timestamp -> 401 (PAY-01: timestamp bat buoc)
+  await request(app).post('/api/public/payments/webhook')
+    .set('x-signature', sig).set('Content-Type', 'application/json').send(raw).expect(401);
+  // replay sau 6 phut -> 401
+  const oldTs = String(Math.floor(Date.now() / 1000) - 6 * 60 - 10);
+  const oldSig = crypto.createHmac('sha256', secret).update(`${oldTs}.`).update(raw).digest('hex');
+  await request(app).post('/api/public/payments/webhook')
+    .set('x-signature', oldSig).set('x-timestamp', oldTs)
+    .set('Content-Type', 'application/json').send(raw).expect(401);
+  // thu tu khoa khac van chap nhan (ky byte-tho, khong phu thuoc stringify)
+  const ref2 = ref + '-REORDER';
+  const bodyRe = { amount: 0, provider: 'vietqr', order_code: ORDER.code, bank_ref: ref2 };
+  const rawRe = JSON.stringify(bodyRe);
+  const sigRe = crypto.createHmac('sha256', secret).update(`${ts}.`).update(rawRe).digest('hex');
   // sai chu ky -> 401
-  await request(app).post('/api/public/payments/webhook').set('x-signature', 'sai').send(body).expect(401);
+  await request(app).post('/api/public/payments/webhook')
+    .set('x-signature', 'sai').set('x-timestamp', ts)
+    .set('Content-Type', 'application/json').send(raw).expect(401);
+  void sigRe; void bodyRe; void rawRe;
   // sau webhook don paid + remain 0
   const after = await request(app).get(`/api/public/orders/${ORDER.code}?contact=${PHONE}`).expect(200);
   assert.equal(after.body.data.status, 'paid');
@@ -135,4 +156,20 @@ test('p3b: webhook HMAC + idempotency + khong double-count (I5)', async () => {
     const t = await get('SELECT * FROM transactions WHERE bank_ref=? AND status=?', [`Webhook ${ref} ${ORDER.code}`.slice(0, 0) || ref, 'matched']);
     assert.ok(t || (await get('SELECT * FROM transactions WHERE bank_ref=?', [ref])), 'payment bank phai co transaction: ' + ref);
   }
+});
+
+test('p3c: webhook limiter rieng — 100 webhook lien tiep cung IP khong bi 429 (PAY-01)', async () => {
+  const secret = process.env.WEBHOOK_SECRET;
+  const ts = String(Math.floor(Date.now() / 1000));
+  let blocked429 = 0;
+  for (let i = 0; i < 40; i++) {
+    const body = { bank_ref: `FLOOD-${Date.now()}-${i}`, order_code: 'DHW-KHONG-CO', amount: 1000, provider: 'vietqr' };
+    const raw = JSON.stringify(body);
+    const sig = crypto.createHmac('sha256', secret).update(`${ts}.`).update(raw).digest('hex');
+    const r = await request(app).post('/api/public/payments/webhook')
+      .set('x-signature', sig).set('x-timestamp', ts)
+      .set('Content-Type', 'application/json').send(raw);
+    if (r.status === 429) blocked429++;
+  }
+  assert.equal(blocked429, 0, 'webhook limiter rieng (300/15p) khong chan 40 req lien tiep');
 });

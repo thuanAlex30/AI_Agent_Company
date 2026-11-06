@@ -10,8 +10,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:?dat JWT_SECRET trong .env truoc khi up}
       - CORS_ORIGIN=http://localhost:5173,http://localhost:5174
       - AGENT_URL=http://agent:3100
-      - AGENT_INTERNAL_KEY=${AGENT_INTERNAL_KEY:-dev-agent-key}
-      - AGENT_PUBLIC_KEY=${AGENT_PUBLIC_KEY:-dev-agent-key}
+      - AGENT_INTERNAL_KEY=${AGENT_INTERNAL_KEY:?dat AGENT_INTERNAL_KEY trong .env truoc khi up}
+      - AGENT_PUBLIC_KEY=${AGENT_PUBLIC_KEY:?dat AGENT_PUBLIC_KEY trong .env truoc khi up}
+      - AGENT_INTERNAL_KEY_OLD=${AGENT_INTERNAL_KEY_OLD:-}
+      - AGENT_PUBLIC_KEY_OLD=${AGENT_PUBLIC_KEY_OLD:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:?dat WEBHOOK_SECRET trong .env truoc khi up}
     volumes:
       - ./data:/data
@@ -28,14 +30,16 @@ services:
 
   agent:
     build: ./agent_svc
-    ports:
-      - "3100:3100"
+    expose:
+      - "3100"
     environment:
       - AGENT_PORT=3100
       - NODE_ENV=production
       - DATABASE_PATH=/data/bizops.db
-      - AGENT_INTERNAL_KEY=${AGENT_INTERNAL_KEY:-dev-agent-key}
-      - AGENT_PUBLIC_KEY=${AGENT_PUBLIC_KEY:-dev-agent-key}
+      - AGENT_INTERNAL_KEY=${AGENT_INTERNAL_KEY:?dat AGENT_INTERNAL_KEY trong .env truoc khi up}
+      - AGENT_PUBLIC_KEY=${AGENT_PUBLIC_KEY:?dat AGENT_PUBLIC_KEY trong .env truoc khi up}
+      - AGENT_INTERNAL_KEY_OLD=${AGENT_INTERNAL_KEY_OLD:-}
+      - AGENT_PUBLIC_KEY_OLD=${AGENT_PUBLIC_KEY_OLD:-}
     volumes:
       - ./data:/data
     healthcheck:

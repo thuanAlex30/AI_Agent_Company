@@ -1,1 +1,32 @@
-{"dependencies":{"react":"^18.3.1","react-dom":"^18.3.1","react-router-dom":"^6.22.0"},"description":"BizOps Storefront — React + Vite public web :5174 (khach hang, khong auth NV)","devDependencies":{"@vitejs/plugin-react":"^4.3.1","vite":"^5.4.0"},"name":"bizops-storefront","private":true,"scripts":{"build":"vite build","dev":"vite --port 5174","preview":"vite preview --port 5174"},"type":"module","version":"6.1.0"}
+{
+  "name": "bizops-storefront",
+  "version": "6.1.0",
+  "private": true,
+  "type": "module",
+  "description": "BizOps Storefront — React + Vite public web :5174 (khach hang, khong auth NV)",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "vite build",
+    "preview": "vite preview --port 5174",
+    "serve:gzip": "node scripts/serve-gzip.cjs",
+    "check:bundle": "node scripts/check-bundle.cjs",
+    "check:ui": "node scripts/ui-check.cjs",
+    "lh": "node scripts/lighthouse.cjs",
+    "lh:median": "node scripts/lh-median.cjs 3",
+    "bench": "node scripts/bench.cjs 5",
+    "e2e:idempotency": "node scripts/e2e-idempotency.cjs",
+    "fonts:subset": "python scripts/subset-fonts.py"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.22.0"
+  },
+  "devDependencies": {
+    "@fontsource/be-vietnam-pro": "^5.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "lighthouse": "^12.8.2",
+    "puppeteer-core": "^24.43.1",
+    "vite": "^5.4.0"
+  }
+}

@@ -5,8 +5,8 @@ const { publicLimiter } = require('./limiters');
 const { resolvePrice } = require('./price');
 
 const router = express.Router();
-router.use(publicLimiter);
-router.use(express.json({ limit: '100kb' }));
+// SEC-03/PAY-01 FIX v7: limiter GAN THEO ROUTE (khong router.use) — tranh dem lan route khac cung mount /api/public
+const __lim = publicLimiter;
 
 function pubProduct(row, stock, priceInfo) {
   return {
@@ -47,7 +47,7 @@ async function stockOf(row) {
 }
 
 // GET /api/public/products?page&limit&search&category&sort
-router.get('/products', async (req, res) => {
+router.get('/products', __lim, async (req, res) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
@@ -85,7 +85,7 @@ router.get('/products', async (req, res) => {
   } catch (e) { return fail(res, e); }
 });
 
-router.get('/products/:slug', async (req, res) => {
+router.get('/products/:slug', __lim, async (req, res) => {
   try {
     const slug = String(req.params.slug || '').slice(0, 64);
     const channel = (req.query.channel || 'web').trim();
@@ -106,7 +106,7 @@ router.get('/products/:slug', async (req, res) => {
   } catch (e) { return fail(res, e); }
 });
 
-router.get('/services', async (req, res) => {
+router.get('/services', __lim, async (req, res) => {
   try {
     const rows = await all('SELECT id, code, name, type, price, unit, description, sort_order FROM services WHERE COALESCE(is_published,1)=1 ORDER BY sort_order, id');
     res.set('Cache-Control', 'public, max-age=60');
@@ -114,7 +114,7 @@ router.get('/services', async (req, res) => {
   } catch (e) { return fail(res, e); }
 });
 
-router.get('/services/:id', async (req, res) => {
+router.get('/services/:id', __lim, async (req, res) => {
   try {
     const id = req.params.id;
     const row = await get(
@@ -127,7 +127,7 @@ router.get('/services/:id', async (req, res) => {
   } catch (e) { return fail(res, e); }
 });
 
-router.get('/banners', async (req, res) => {
+router.get('/banners', __lim, async (req, res) => {
   try {
     const rows = await all('SELECT slug, title, image_url, link, sort_order FROM banners WHERE COALESCE(is_active,1)=1 ORDER BY sort_order, id');
     res.set('Cache-Control', 'public, max-age=60');
@@ -135,9 +135,11 @@ router.get('/banners', async (req, res) => {
   } catch (e) { return fail(res, e); }
 });
 
-router.get('/promotions', async (req, res) => {
+router.get('/promotions', __lim, async (req, res) => {
   try {
-    const rows = await all("SELECT code, title, description, start_date, end_date FROM promotions WHERE COALESCE(is_active,1)=1 AND (start_date IS NULL OR start_date <= date('now')) AND (end_date IS NULL OR end_date >= date('now')) ORDER BY id DESC");
+    const { businessDayVN } = require('../common/db');
+    const today = businessDayVN();
+    const rows = await all('SELECT code, title, description, start_date, end_date FROM promotions WHERE COALESCE(is_active,1)=1 AND (start_date IS NULL OR start_date <= ?) AND (end_date IS NULL OR end_date >= ?) ORDER BY id DESC', [today, today]);
     res.set('Cache-Control', 'public, max-age=60');
     return ok(res, { items: rows });
   } catch (e) { return fail(res, e); }

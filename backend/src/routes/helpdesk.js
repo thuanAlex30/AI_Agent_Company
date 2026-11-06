@@ -9,7 +9,8 @@ const router = express.Router();
 router.use(authenticate);
 
 const AGENT_URL = process.env.AGENT_URL || 'http://localhost:3100';
-const AGENT_KEY = process.env.AGENT_INTERNAL_KEY || 'dev-agent-key';
+const cfgKeys = require('../config');
+const AGENT_KEY = cfgKeys.AGENT_INTERNAL_KEY;
 
 // POST /api/cskh/chat -> proxy sang agent_svc (HTTP, port 3100).
 // Backend giu auth + RBAC + rate-limit; agent giu rule-engine + RAG + guardrail.

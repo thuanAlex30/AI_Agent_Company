@@ -4,19 +4,27 @@ const { ok, fail } = require('../common/errors');
 const { publicChatLimiter } = require('./limiters');
 
 const router = express.Router();
-router.use(publicChatLimiter);
+// SEC-03/PAY-01 FIX v7: limiter GAN THEO ROUTE
 router.use(express.json({ limit: '50kb' }));
 
 const AGENT_URL = process.env.AGENT_URL || 'http://localhost:3100';
-const AGENT_PUBLIC_KEY = process.env.AGENT_PUBLIC_KEY || process.env.AGENT_INTERNAL_KEY || 'dev-agent-key';
+const cfgKeys = require('../config');
+const AGENT_PUBLIC_KEY = cfgKeys.AGENT_PUBLIC_KEY;
 
-router.post('/chat', async (req, res) => {
+router.post('/chat', publicChatLimiter, async (req, res) => {
   try {
     const message = String(req.body.message || '').slice(0, 500);
     if (!message.trim()) return res.status(400).json({ ok: false, error: { code: 'VALIDATION', message: 'Thieu message' } });
     const r = await fetch(AGENT_URL + '/public-chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-agent-key': AGENT_PUBLIC_KEY },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-agent-key': AGENT_PUBLIC_KEY,
+        // AVAIL-01 FIX v7: chuyen IP that cua khach de agent gioi han theo khach,
+        // khong de moi khach don thanh 1 IP (backend) lam chan ca website
+        'x-client-ip': req.ip || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown',
+        'x-request-id': req.requestId || '',
+      },
       body: JSON.stringify({
         message,
         lookup_token: req.body.lookup_token || null,

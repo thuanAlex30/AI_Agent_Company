@@ -7,7 +7,7 @@ const hr = require('../modules/hr/service');
 const router = express.Router();
 router.use(authenticate);
 
-router.get('/employees', requirePerm('orders.read'), async (req, res) => {
+router.get('/employees', requirePerm('hr.read'), async (req, res) => {
   try {
     const rows = await all('SELECT * FROM employees ORDER BY code LIMIT 200');
     return ok(res, rows.map((r) => filterEmployeeRow(r, req.user.role)));
@@ -40,15 +40,15 @@ router.post('/attendance/checkout', requirePerm('attendance.checkin'), async (re
     return ok(res, await hr.checkout(null, req.user, reqStr(req.body, 'employee_code')));
   } catch (e) { return fail(res, e); }
 });
-router.get('/hr/today', requirePerm('orders.read'), async (req, res) => {
+router.get('/hr/today', requirePerm('hr.read'), async (req, res) => {
   try { return ok(res, await hr.todayList(null, req.user)); }
   catch (e) { return fail(res, e); }
 });
-router.get('/hr/payroll-preview', requirePerm('orders.read'), async (req, res) => {
+router.get('/hr/payroll-preview', requirePerm('hr.read'), async (req, res) => {
   try { return ok(res, await hr.payrollPreview(null, req.user, req.query.month)); }
   catch (e) { return fail(res, e); }
 });
-router.get('/recruitments', requirePerm('orders.read'), async (req, res) => {
+router.get('/recruitments', requirePerm('hr.read'), async (req, res) => {
   try { return ok(res, await all('SELECT * FROM recruitments ORDER BY id DESC LIMIT 100')); }
   catch (e) { return fail(res, e); }
 });

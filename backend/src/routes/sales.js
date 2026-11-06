@@ -133,7 +133,8 @@ router.post('/orders/:id/refund', requirePerm('orders.write'), async (req, res) 
 
 router.get('/sales/kpi', requirePerm('orders.read'), async (req, res) => {
   try {
-    const rev = await get("SELECT COALESCE(SUM(amount),0) s, COUNT(*) c FROM orders WHERE order_date >= date('now','-30 days') AND status NOT IN ('cancelled','refunded','draft')");
+    const { sinceVN } = require('../common/db');
+    const rev = await get("SELECT COALESCE(SUM(amount),0) s, COUNT(*) c FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
     const won = await get("SELECT COUNT(*) c FROM leads WHERE stage='won'");
     const total = await get('SELECT COUNT(*) c FROM leads');
     const winRate = total?.c ? Math.round((won?.c || 0) / total.c * 1000) / 10 : 0;

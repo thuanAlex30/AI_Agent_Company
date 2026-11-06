@@ -10,7 +10,7 @@ const router = express.Router();
 router.use(authenticate);
 
 // transactions
-router.get('/transactions', requirePerm('orders.read'), async (req, res) => {
+router.get('/transactions', requirePerm('finance.read'), async (req, res) => {
   try { return ok(res, await all('SELECT * FROM transactions ORDER BY id DESC LIMIT 500')); }
   catch (e) { return fail(res, e); }
 });
@@ -54,7 +54,7 @@ router.post('/reconcile/run', requirePerm('payments.write'), async (req, res) =>
 });
 
 // debts
-router.get('/debts', requirePerm('orders.read'), async (req, res) => {
+router.get('/debts', requirePerm('finance.read'), async (req, res) => {
   try {
     const rows = await all('SELECT * FROM debts ORDER BY id DESC LIMIT 500');
     return ok(res, financeService.classifyDebts(rows));
@@ -100,7 +100,7 @@ router.post('/payments', requirePerm('payments.write'), async (req, res) => {
 });
 
 // expenses
-router.get('/expenses', requirePerm('orders.read'), async (req, res) => {
+router.get('/expenses', requirePerm('finance.read'), async (req, res) => {
   try { return ok(res, await all('SELECT * FROM expenses ORDER BY id DESC LIMIT 200')); }
   catch (e) { return fail(res, e); }
 });
@@ -119,15 +119,15 @@ router.post('/expenses', requirePerm('expenses.write'), async (req, res) => {
   } catch (e) { return fail(res, e); }
 });
 
-router.get('/finance/kpis', requirePerm('orders.read'), async (req, res) => {
+router.get('/finance/kpis', requirePerm('finance.read'), async (req, res) => {
   try { return ok(res, await financeService.financeKpis(null)); }
   catch (e) { return fail(res, e); }
 });
-router.get('/reminders', requirePerm('orders.read'), async (req, res) => {
+router.get('/reminders', requirePerm('finance.read'), async (req, res) => {
   try { return ok(res, await all('SELECT * FROM reminder_log ORDER BY id DESC LIMIT 200')); }
   catch (e) { return fail(res, e); }
 });
-router.get('/budgets', requirePerm('orders.read'), async (req, res) => {
+router.get('/budgets', requirePerm('finance.read'), async (req, res) => {
   try { return ok(res, await all('SELECT * FROM budgets ORDER BY month DESC LIMIT 200')); }
   catch (e) { return fail(res, e); }
 });

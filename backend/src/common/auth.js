@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { get, run } = require('./db');
+const { nowPlusMinutesISO } = require('./db');
 const { AppError } = require('./errors');
 const logger = require('./logger');
 
@@ -33,7 +34,7 @@ async function login(username, password) {
   if (!okPwd) {
     const failed = (user.failed_attempts || 0) + 1;
     if (failed >= 5) {
-      await run("UPDATE users SET failed_attempts=?, locked_until=datetime('now','+15 minutes') WHERE id=?", [failed, user.id]);
+      await run('UPDATE users SET failed_attempts=?, locked_until=? WHERE id=?', [failed, nowPlusMinutesISO(15), user.id]);
     } else {
       await run('UPDATE users SET failed_attempts=? WHERE id=?', [failed, user.id]);
     }

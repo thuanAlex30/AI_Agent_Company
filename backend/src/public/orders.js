@@ -10,7 +10,7 @@ const { publicOrderLimiter } = require('./limiters');
 const { resolvePrice } = require('./price');
 
 const router = express.Router();
-router.use(publicOrderLimiter);
+// SEC-03/PAY-01 FIX v7: limiter GAN THEO ROUTE — router.use o day se dem ca webhook/lookup/chat
 router.use(express.json({ limit: '100kb' }));
 
 function isPhoneVN(s) {
@@ -50,7 +50,7 @@ async function findOrCreateCustomer(c, { name, phone, email, address }) {
 }
 
 // POST /api/public/orders — checkout
-router.post('/orders', async (req, res) => {
+router.post('/orders', publicOrderLimiter, async (req, res) => {
   try {
     const body = req.body || {};
     const name = sanitize(reqStr(body, 'name', { max: 120 }));
@@ -143,7 +143,7 @@ router.post('/orders', async (req, res) => {
 });
 
 // POST /api/public/service-requests — đặt lịch/báo giá chi tiết (teabreak)
-router.post('/service-requests', async (req, res) => {
+router.post('/service-requests', publicOrderLimiter, async (req, res) => {
   try {
     const body = req.body || {};
     const serviceCode = reqStr(body, 'service_id', { max: 32 });

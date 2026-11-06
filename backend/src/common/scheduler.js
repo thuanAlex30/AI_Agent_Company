@@ -20,8 +20,8 @@ function initScheduler() {
 
   cron.schedule('*/5 * * * *', async () => {
     try {
-      const { run } = require('./db');
-      const r = await run("UPDATE sop_tasks SET status='overdue' WHERE status IN ('todo','doing') AND due_date IS NOT NULL AND due_date < date('now')", []);
+      const { run, businessDayVN } = require('./db');
+      const r = await run("UPDATE sop_tasks SET status='overdue' WHERE status IN ('todo','doing') AND due_date IS NOT NULL AND due_date < ?", [businessDayVN()]);
       if (r.changes) logger.info('cron 5p: sop overdue', { changes: r.changes });
     } catch (e) { logger.error('cron sop fail', { msg: e.message }); }
   }, { timezone: 'Asia/Ho_Chi_Minh' });
@@ -37,7 +37,8 @@ function initScheduler() {
     try {
       // brief qua agent_svc (HTTP) — backend khong giu rule/LLM, chi lap lich
       const url = process.env.AGENT_URL || 'http://localhost:3100';
-      const key = process.env.AGENT_INTERNAL_KEY || 'dev-agent-key';
+      const cfgKeys = require('./config');
+      const key = cfgKeys.AGENT_INTERNAL_KEY;
       const r = await fetch(url + '/brief', { headers: { 'x-agent-key': key } });
       const body = await r.json().catch(() => ({}));
       if (body.ok) logger.info('cron 8h05: brief tu agent', { len: String(body.data?.markdown || '').length });

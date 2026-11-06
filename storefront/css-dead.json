@@ -1,0 +1,112 @@
+[
+ {
+  "sel": "select",
+  "body": "font-size:16px",
+  "len": 22
+ },
+ {
+  "sel": "button",
+  "body": "min-height:44px",
+  "len": 23
+ },
+ {
+  "sel": "textarea",
+  "body": "font-size:16px",
+  "len": 24
+ },
+ {
+  "sel": "button",
+  "body": "font:inherit;color:inherit",
+  "len": 34
+ },
+ {
+  "sel": "select",
+  "body": "font:inherit;color:inherit",
+  "len": 34
+ },
+ {
+  "sel": "textarea",
+  "body": "font:inherit;color:inherit",
+  "len": 36
+ },
+ {
+  "sel": "img",
+  "body": "max-width:100%;height:auto;display:block",
+  "len": 45
+ },
+ {
+  "sel": "svg",
+  "body": "max-width:100%;height:auto;display:block",
+  "len": 45
+ },
+ {
+  "sel": "video",
+  "body": "max-width:100%;height:auto;display:block",
+  "len": 47
+ },
+ {
+  "sel": ".qtybox input",
+  "body": "margin:0;width:84px;text-align:center",
+  "len": 52
+ },
+ {
+  "sel": ".pill.hot",
+  "body": "background:var(--err-bg);color:var(--err)",
+  "len": 52
+ },
+ {
+  "sel": ".qtybox",
+  "body": "display:flex;gap:var(--s-1);align-items:center",
+  "len": 55
+ },
+ {
+  "sel": "html",
+  "body": "-webkit-text-size-adjust:100%;scroll-behavior:smooth",
+  "len": 58
+ },
+ {
+  "sel": ".skel",
+  "body": "background:var(--surface-2);border-radius:var(--r-sm);min-height:18px",
+  "len": 76
+ },
+ {
+  "sel": ".shell-page-desc",
+  "body": "margin:var(--s-2) 0 var(--s-5);color:var(--ink-600);max-width:52ch",
+  "len": 84
+ },
+ {
+  "sel": ".toolbar",
+  "body": "display:flex;gap:var(--s-2);flex-wrap:wrap;margin-bottom:var(--s-3);align-items:center",
+  "len": 96
+ },
+ {
+  "sel": ".pill",
+  "body": "display:inline-block;border-radius:var(--r-pill);padding:2px var(--s-2);font-size:var(--fs-xs);background:var(--surface-2);font-weight:700",
+  "len": 145
+ },
+ {
+  "sel": ".toolbar input",
+  "body": "border:1px solid var(--line);border-radius:var(--r-sm);padding:var(--s-2) var(--s-3);min-height:44px;font-size:16px;background:var(--surface)",
+  "len": 157
+ },
+ {
+  "sel": ".toolbar select",
+  "body": "border:1px solid var(--line);border-radius:var(--r-sm);padding:var(--s-2) var(--s-3);min-height:44px;font-size:16px;background:var(--surface)",
+  "len": 158
+ },
+ {
+  "sel": "body",
+  "body": "margin:0;font-family:var(--font);font-size:var(--fs-md);line-height:1.55;color:var(--ink-900);background:var(--bg);-webkit-font-smoothing:antialiased;overflow-x:hidden",
+  "len": 173
+ },
+ {
+  "sel": "select",
+  "body": "border:1px solid var(--line);border-radius:var(--r-sm);padding:var(--s-2) var(--s-3);margin:var(--s-1) 0;font-size:16px;width:100%;background:var(--surface);color:var(--ink-900)",
+  "len": 185
+ },
+ {
+  "sel": "textarea",
+  "body": "border:1px solid var(--line);border-radius:var(--r-sm);padding:var(--s-2) var(--s-3);margin:var(--s-1) 0;font-size:16px;width:100%;background:var(--surface);color:var(--ink-900)",
+  "len": 187
+ }
+]

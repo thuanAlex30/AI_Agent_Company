@@ -1,47 +1,82 @@
-import { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+// App.jsx — Shell + routing.
+//
+// B2 chia ma theo route (React.lazy + Suspense) — JS ban dau giam, cac trang tai ve sau
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import Layout from './components/Layout.jsx';
-import ChatWidget from './components/ChatWidget.jsx';
+import { ErrorBoundary } from './components/ErrorBoundary.jsx';
+import { ToastProvider, useToast } from './components/ui/Toast.jsx';
+import { SkeletonCard } from './components/ui/Skeleton.jsx';
 import Home from './pages/Home.jsx';
-import Catalog from './pages/Catalog.jsx';
-import Detail from './pages/Detail.jsx';
-import Services from './pages/Services.jsx';
-import Cart from './pages/Cart.jsx';
-import Checkout from './pages/Checkout.jsx';
-import Confirm from './pages/Confirm.jsx';
-import Lookup from './pages/Lookup.jsx';
-import SearchPage from './pages/SearchPage.jsx';
-import Promos from './pages/Promos.jsx';
-import Support from './pages/Support.jsx';
-import './styles.css';
+
+const Catalog = lazy(() => import('./pages/Catalog.jsx'));
+const Detail = lazy(() => import('./pages/Detail.jsx'));
+const Services = lazy(() => import('./pages/Services.jsx'));
+const Cart = lazy(() => import('./pages/Cart.jsx'));
+const Checkout = lazy(() => import('./pages/Checkout.jsx'));
+const Confirm = lazy(() => import('./pages/Confirm.jsx'));
+const Lookup = lazy(() => import('./pages/Lookup.jsx'));
+const SearchPage = lazy(() => import('./pages/SearchPage.jsx'));
+const Promos = lazy(() => import('./pages/Promos.jsx'));
+const Support = lazy(() => import('./pages/Support.jsx'));
+// ChatWidget lazy: phu add-on, khong can nam trong JS ban dau
+const ChatWidget = lazy(() => import('./components/ChatWidget.jsx'));
+
+function RouteFallback() {
+  return (
+    <div className="grid" style={{ marginTop: 'var(--s-4)' }}>
+      {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
+    </div>
+  );
+}
+
+function NotFound() {
+  return (
+    <div className="ui-state">
+      <h1 className="ui-state-title" style={{ fontSize: 'var(--fs-3xl)' }}>404</h1>
+      <p className="ui-state-desc">Không tìm thấy trang bạn đang tìm.</p>
+      <Link className="ui-btn btn-primary" to="/">Về trang chủ</Link>
+    </div>
+  );
+}
+
+function Shell() {
+  const toast = useToast();
+  return (
+    <ErrorBoundary name="shell">
+      <Layout>
+        <ErrorBoundary name="page">
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/" element={<Home toast={toast} />} />
+              <Route path="/san-pham" element={<Catalog toast={toast} />} />
+              <Route path="/san-pham/:slug" element={<Detail toast={toast} />} />
+              <Route path="/dich-vu" element={<Services toast={toast} />} />
+              <Route path="/gio" element={<Cart toast={toast} />} />
+              <Route path="/thanh-toan" element={<Checkout toast={toast} />} />
+              <Route path="/xac-nhan" element={<Confirm toast={toast} />} />
+              <Route path="/tra-cuu" element={<Lookup toast={toast} />} />
+              <Route path="/tim-kiem" element={<SearchPage toast={toast} />} />
+              <Route path="/khuyen-mai" element={<Promos toast={toast} />} />
+              <Route path="/ho-tro" element={<Support toast={toast} />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
+      </Layout>
+      <Suspense fallback={null}>
+        <ChatWidget />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
 
 export default function App() {
-  const [toasts, setToasts] = useState([]);
-  function toast(msg) {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, msg }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
-  }
   return (
-    <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Home toast={toast} />} />
-          <Route path="/san-pham" element={<Catalog toast={toast} />} />
-          <Route path="/san-pham/:slug" element={<Detail toast={toast} />} />
-          <Route path="/dich-vu" element={<Services toast={toast} />} />
-          <Route path="/gio" element={<Cart />} />
-          <Route path="/thanh-toan" element={<Checkout toast={toast} />} />
-          <Route path="/xac-nhan" element={<Confirm />} />
-          <Route path="/tra-cuu" element={<Lookup toast={toast} />} />
-          <Route path="/tim-kiem" element={<SearchPage toast={toast} />} />
-          <Route path="/khuyen-mai" element={<Promos />} />
-          <Route path="/ho-tro" element={<Support />} />
-          <Route path="*" element={<div className="card">Không thấy trang. <a href="/">Về cửa hàng</a></div>} />
-        </Routes>
-      </Layout>
-      <ChatWidget />
-      <div id="toast">{toasts.map((t) => <div className="toast" key={t.id}>{t.msg}</div>)}</div>
-    </BrowserRouter>
+    <ToastProvider>
+      <BrowserRouter>
+        <Shell />
+      </BrowserRouter>
+    </ToastProvider>
   );
 }

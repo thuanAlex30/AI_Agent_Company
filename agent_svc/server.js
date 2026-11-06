@@ -2,6 +2,7 @@ const express = require('express');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
+const cfg = require('./src/config');
 const { ok } = require('./src/errors');
 const chatRoutes = require('./src/routes/chat');
 const agent = require('./src/agent');
@@ -9,21 +10,40 @@ const agent = require('./src/agent');
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(helmet());
-app.use(rateLimit({ windowMs: 5 * 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false }));
+
+// AVAIL-01 FIX v7: limiter TOAN CUC phai dem theo IP THAT cua khach (x-client-ip do backend gui).
+// Neu dem theo req.ip, moi khach = 1 IP backend -> ca storefront bi chan (bug goc).
+// Request noi bo (khong co x-client-ip) dem theo key dich vu (x-agent-key) de moi backend 1 bucket.
+const isTest = process.env.NODE_ENV === 'test';
+function clientKey(req) {
+  const ip = String(req.headers['x-client-ip'] || '').trim().slice(0, 64);
+  if (ip) return ip;
+  const svc = String(req.headers['x-agent-key'] || '').trim().slice(0, 64);
+  return svc || 'unknown';
+}
+app.use(rateLimit({
+  windowMs: 5 * 60 * 1000, max: isTest ? 1000 : 120, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: clientKey,
+}));
+// Limiter rieng cho route noi bo (brief/skills) — theo key dich vu, khong theo IP khach
+const internalLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, max: isTest ? 1000 : 60, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: (req) => String(req.headers['x-agent-key'] || 'unknown').slice(0, 64),
+});
 
 app.get('/health', (req, res) => ok(res, { status: 'up', service: 'agent_svc', version: '6.1.0', time: new Date().toISOString() }));
 app.use('/', chatRoutes);
-app.get('/brief', async (req, res) => {
+app.get('/brief', internalLimiter, async (req, res) => {
   try {
-    if (req.headers['x-agent-key'] !== (process.env.AGENT_INTERNAL_KEY || 'dev-agent-key')) {
+    if (!cfg.checkInternalKey(req.headers['x-agent-key'])) {
       return res.status(401).json({ ok: false, error: { code: 'AUTH', message: 'Agent key khong hop le' } });
     }
     return ok(res, { markdown: await agent.brief(null) });
   } catch (e) { return res.status(500).json({ ok: false, error: { code: 'INTERNAL', message: e.message } }); }
 });
-app.get('/skills', async (req, res) => {
+app.get('/skills', internalLimiter, async (req, res) => {
   try {
-    if (req.headers['x-agent-key'] !== (process.env.AGENT_INTERNAL_KEY || 'dev-agent-key')) {
+    if (!cfg.checkInternalKey(req.headers['x-agent-key'])) {
       return res.status(401).json({ ok: false, error: { code: 'AUTH', message: 'Agent key khong hop le' } });
     }
     return ok(res, await agent.runAll(null));

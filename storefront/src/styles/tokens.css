@@ -1,0 +1,144 @@
+/* tokens.css — B1 nen tang thiet ke (spec §3.1)
+   Mot nguon su that cho mau/bo goc/chu/khoang cach/chuyen dong.
+   Doi nganh = doi file token, khong sua component. */
+
+:root {
+  /* Mau — giu nhan dien hien tai, mo rong thang do */
+  --brand-900: #3E2A1D;
+  --brand-700: #6F4E37;
+  --brand-500: #8A6A52;
+  --brand-100: #F1E7DD;
+  /* accent-600 dung lam NEN nut + CHU tren nen sang: duong toi thieu 4.5:1 voi #fff
+     (accent-500 chi dung cho trang tri/border, khong dung lam nen chu) */
+  --accent-600: #B25213;
+  --accent-700: #9E4711;
+  --accent-500: #E8762D;
+  --accent-100: #FFEBDD;
+  --bg: #FAF7F2;
+  --surface: #FFFFFF;
+  --surface-2: #F6F1EA;
+  --ink-900: #1A2233;
+  --ink-600: #4B5563;
+  --ink-400: #6B7280;
+  --line: #EADFD3;
+
+  --ok: #166534; --ok-bg: #DCFCE7;
+  /* --warn / --accent-700 duoc lam CHU tren nen sang (badge, alert) nen phai
+     >= 4.5:1 theo WCAG AA. --warn cu 4.51:1 (qua mong manh) -> toi lai.
+     --accent-600 chi dung lam NEN nut voi chu #fff (5.11:1) khong dung lam
+     CHU tren nen sang. */
+  --warn: #9A3E07; --warn-bg: #FEF3C7;
+  --err: #B91C1C; --err-bg: #FEE2E2;
+  --info: #1D4ED8; --info-bg: #DBEAFE;
+
+  /* Kieu chu — thang 1.2 */
+  /* 'BVP Fallback' la font metric-compatible voi Be Vietnam Pro (fonts.css):
+     fallback chiem DUNG bo -> webfont swap khong doi layout -> LCP chi ghi 1 lan. */
+  --font: "Be Vietnam Pro", "BVP Fallback", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --fs-xs: .78rem; --fs-sm: .875rem; --fs-md: 1rem;
+  --fs-lg: 1.2rem; --fs-xl: 1.5rem; --fs-2xl: 2rem;
+  --fs-3xl: clamp(2rem, 4vw + 1rem, 3.25rem);
+
+  /* Khong gian & hinh khoi */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
+  --s-5: 24px; --s-6: 32px; --s-7: 48px; --s-8: 72px;
+  --r-sm: 10px; --r-md: 16px; --r-lg: 24px; --r-pill: 999px;
+
+  --shadow-1: 0 1px 2px rgba(62, 42, 29, .06), 0 2px 8px rgba(62, 42, 29, .06);
+  --shadow-2: 0 6px 24px rgba(62, 42, 29, .12);
+
+  /* Chuyen dong */
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --t-fast: 150ms; --t-base: 250ms; --t-slow: 500ms;
+
+  --header-h: 64px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --nav-h: 60px;
+  --container: 1200px;
+}
+
+/* Reset + nen tang */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  color: var(--ink-900);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+img, svg, video { max-width: 100%; height: auto; display: block; }
+
+a { color: inherit; text-decoration: none; }
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-600);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Chi doc voi trinh doc man hinh (tieu de trang khi rong/lai) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Vung cham toi thieu 44x44 (WCAG 2.2) */
+button, [role="button"], a.btn, input[type="submit"] { min-height: 44px; }
+
+/* Input >= 16px de iOS khong tu zoom */
+input, select, textarea { font-size: 16px; }
+
+/* Bo qua chuyen dong khi nguoi dung yeu cau */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skip link — dieu huong bang ban phim */
+.skip-link {
+  position: absolute;
+  left: var(--s-3);
+  top: -100px;
+  z-index: 100;
+  background: var(--brand-700);
+  color: #fff;
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-sm);
+  transition: top var(--t-fast) var(--ease);
+}
+.skip-link:focus { top: var(--s-3); }
+
+/* Container dung chung */
+.container {
+  width: 100%;
+  max-width: var(--container);
+  margin-inline: auto;
+  padding-inline: var(--s-4);
+}
+@media (min-width: 768px) { .container { padding-inline: var(--s-5); } }

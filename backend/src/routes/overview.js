@@ -55,7 +55,7 @@ router.get('/product-features', requirePerm('orders.read'), async (req, res) => 
   try { return ok(res, await productService.list(null)); }
   catch (e) { return fail(res, e); }
 });
-router.post('/product-features', requirePerm('orders.read'), async (req, res) => {
+router.post('/product-features', requirePerm('productfeat.write'), async (req, res) => {
   try {
     return ok(res, await productService.create(null, { title: req.body.title, stage: req.body.stage || 'idea', owner: req.body.owner || null, actor: req.user.username }));
   } catch (e) { return fail(res, e); }

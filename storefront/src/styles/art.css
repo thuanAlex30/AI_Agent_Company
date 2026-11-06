@@ -1,0 +1,48 @@
+/* styles/art.css — ANH TRANG TRI (SVG inline) — sinh boi scripts/gen-art.cjs
+ *
+ * SPEC §7.1: anh trang tri phai la pseudo-element / background-image, KHONG phai
+ * text node trong DOM — neu la text node, khoi anh lon (vd 332x332) tro thanh
+ * ung vien LCP va Chrome GHI LAI LCP o thoi diem muon.
+ *
+ * Vì sao KHONG dung emoji nua:
+ *   `content: '☕🍰'` -> trinh duyet phai fallback sang system emoji font
+ *   (Segoe UI Emoji) + shaping moi glyph. Do duoc bang scripts/css-lab3.cjs
+ *   (CPU throttle 4x, interleaved x7): Layout cua shell tang tu 417ms len 641ms
+ *   (+224ms) — chi rieng phan fallback font. Day la nguyen nhan lon cua
+ *   TBT > 200ms. SVG data-URI: 0 font, 0 shaping, 0 request them.
+ */
+
+.art-cafe::after {
+  content: '';
+  display: block;
+  width: 46%; height: 46%;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23A9714B%27%20stroke-width%3D%271.8%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M4%209h12v6a5%205%200%200%201-5%205H9a5%205%200%200%201-5-5z%27%2F%3E%3Cpath%20d%3D%27M16%2011h2a2.5%202.5%200%200%201%200%205h-2%27%2F%3E%3Cpath%20d%3D%27M8%203c0%201.5-1.5%201.5-1.5%203M12%203c0%201.5-1.5%201.5-1.5%203%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+}
+
+.art-tra::after {
+  content: '';
+  display: block;
+  width: 46%; height: 46%;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%234E8B62%27%20stroke-width%3D%271.8%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M6%207h10v8a4%204%200%200%201-4%204h-2a4%204%200%200%201-4-4z%27%2F%3E%3Cpath%20d%3D%27M9%2014c2-3%205-3%207-4-.5%204-3%206-7%205z%27%20fill%3D%27%2523fff%27%20fill-opacity%3D%27.35%27%20stroke%3D%27none%27%2F%3E%3Cpath%20d%3D%27M11%2019v3M8%2022h6%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+}
+
+.art-banh::after {
+  content: '';
+  display: block;
+  width: 46%; height: 46%;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23C08A4E%27%20stroke-width%3D%271.8%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M4%2019h16v-4H4z%27%2F%3E%3Cpath%20d%3D%27M4%2015c0-1.5%201-2.5%202.5-2.5S9%2013.5%209%2015s1%202.5%202.5%202.5S14%2016%2014%2015s1-2.5%202.5-2.5S19%2013.5%2019%2015%27%2F%3E%3Cpath%20d%3D%27M12%2012V8%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%276.5%27%20r%3D%271.6%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+}
+
+.art-combo::after {
+  content: '';
+  display: block;
+  width: 46%; height: 46%;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%233E7C9E%27%20stroke-width%3D%271.8%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Crect%20x%3D%274%27%20y%3D%2710%27%20width%3D%2716%27%20height%3D%2710%27%20rx%3D%271%27%2F%3E%3Cpath%20d%3D%27M3%206h18v4H3z%27%2F%3E%3Cpath%20d%3D%27M12%206v14%27%2F%3E%3Cpath%20d%3D%27M12%206c-1-3-5-4-5.5-1-.5%202.5%205.5%201%205.5%201zM12%206c1-3%205-4%205.5-1%20.5%202.5-5.5%201-5.5%201z%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+}
+
+.hero .imgbox::after {
+  content: '';
+  display: block;
+  width: 62%; height: 62%;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2064%2064%27%20fill%3D%27none%27%20stroke%3D%27%23FFFFFF%27%20stroke-width%3D%271.8%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M10%2024h32v16a10%2010%200%200%201-10%2010h-12a10%2010%200%200%201-10-10z%27%2F%3E%3Cpath%20d%3D%27M42%2028h4a6%206%200%200%201%200%2012h-4%27%2F%3E%3Cpath%20d%3D%27M20%2010c0%203-3%203-3%206M32%208c0%203-3%203-3%206%27%2F%3E%3Cpath%20d%3D%27M52%2044c-3-2-7%200-7%204s4%206%207%204%203-6%200-8z%27%20fill%3D%27%2523E8A0B4%27%20stroke%3D%27none%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+}

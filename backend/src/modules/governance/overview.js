@@ -1,4 +1,4 @@
-const { todayVN } = require('../../common/db');
+const { todayVN, sinceVN } = require('../../common/db');
 
 // overview 12 khoi + ceo. Moi khoi try/catch rieng — 1 skill loi khong sap overview.
 async function safe(fn, fallback) {
@@ -13,13 +13,13 @@ async function getOverview(conn) {
 
   out.ceo = await safe(async () => {
     const emp = await c.get("SELECT COUNT(*) c FROM employees WHERE status IN ('active','probation')");
-    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= date('now','-30 days') AND status NOT IN ('cancelled','refunded','draft')");
+    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
     const appr = await c.get("SELECT COUNT(*) c FROM approvals WHERE status='pending'");
     return { headcount: Number(emp?.c || 0), revenue30d: Number(rev?.s || 0), approvals_pending: Number(appr?.c || 0) };
   });
 
   out.sales = await safe(async () => {
-    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s, COUNT(*) co FROM orders WHERE order_date >= date('now','-30 days') AND status NOT IN ('cancelled','refunded','draft')");
+    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s, COUNT(*) co FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
     const won = await c.get("SELECT COUNT(*) c FROM leads WHERE stage='won'");
     const lost = await c.get("SELECT COUNT(*) c FROM leads WHERE stage='lost'");
     const w = Number(won?.c || 0), l = Number(lost?.c || 0);
@@ -70,7 +70,7 @@ async function getOverview(conn) {
 
   out.hr = await safe(async () => {
     const total = await c.get("SELECT COUNT(*) c FROM employees WHERE status IN ('active','probation')");
-    const left = await c.get("SELECT COUNT(*) c FROM employees WHERE left_date IS NOT NULL AND left_date >= date('now','-30 days')");
+    const left = await c.get('SELECT COUNT(*) c FROM employees WHERE left_date IS NOT NULL AND left_date >= ?', [sinceVN(30)]);
     const t = Number(total?.c || 0);
     const turnover = t ? Math.round(Number(left?.c || 0) / t * 1000) / 10 : 0;
     const today = todayVN();

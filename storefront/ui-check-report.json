@@ -1,0 +1,581 @@
+{
+  "base": "http://127.0.0.1:5174",
+  "routes": [
+    {
+      "name": "Home",
+      "path": "/",
+      "title": "Đặt món & Teabreak văn phòng · BizOps Café",
+      "hasMain": true,
+      "h1": 1,
+      "text": 1667,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    },
+    {
+      "name": "Catalog",
+      "path": "/san-pham",
+      "title": "Thực đơn · BizOps Café",
+      "hasMain": true,
+      "h1": 1,
+      "text": 823,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    },
+    {
+      "name": "Detail",
+      "path": "/san-pham/ca-phe-sua",
+      "title": "Ca phe sua · BizOps Café",
+      "hasMain": true,
+      "h1": 1,
+      "text": 792,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    },
+    {
+      "name": "Checkout",
+      "path": "/thanh-toan",
+      "title": "Thanh toán · BizOps Café",
+      "hasMain": true,
+      "h1": 1,
+      "text": 579,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    },
+    {
+      "name": "Cart",
+      "path": "/gio",
+      "title": "Giỏ hàng · BizOps Café",
+      "hasMain": true,
+      "h1": 1,
+      "text": 602,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    },
+    {
+      "name": "Lookup",
+      "path": "/tra-cuu",
+      "title": "Tra cứu đơn · BizOps Café",
+      "hasMain": true,
+      "h1": 1,
+      "text": 727,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    },
+    {
+      "name": "Services",
+      "path": "/dich-vu",
+      "title": "Teabreak văn phòng · BizOps Café",
+      "hasMain": true,
+      "h1": 1,
+      "text": 1344,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    },
+    {
+      "name": "Promos",
+      "path": "/khuyen-mai",
+      "title": "Khuyến mãi · BizOps Café",
+      "hasMain": true,
+      "h1": 1,
+      "text": 809,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    },
+    {
+      "name": "Support",
+      "path": "/ho-tro",
+      "title": "Hỗ trợ & FAQ · BizOps Café",
+      "hasMain": true,
+      "h1": 1,
+      "text": 922,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    },
+    {
+      "name": "404",
+      "path": "/khong-co-trang-abc",
+      "title": "BizOps Café — Đặt món & Teabreak",
+      "hasMain": true,
+      "h1": 1,
+      "text": 562,
+      "imgsNoAlt": 0,
+      "btnNoLabel": 0,
+      "inputNoLabel": 0
+    }
+  ],
+  "responsive": [
+    {
+      "route": "Home",
+      "path": "/",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Home",
+      "path": "/",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Home",
+      "path": "/",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Home",
+      "path": "/",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Home",
+      "path": "/",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Catalog",
+      "path": "/san-pham",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": [
+        "chip r=421"
+      ]
+    },
+    {
+      "route": "Catalog",
+      "path": "/san-pham",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": [
+        "chip r=421"
+      ]
+    },
+    {
+      "route": "Catalog",
+      "path": "/san-pham",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Catalog",
+      "path": "/san-pham",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Catalog",
+      "path": "/san-pham",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Detail",
+      "path": "/san-pham/ca-phe-sua",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Detail",
+      "path": "/san-pham/ca-phe-sua",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Detail",
+      "path": "/san-pham/ca-phe-sua",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Detail",
+      "path": "/san-pham/ca-phe-sua",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Detail",
+      "path": "/san-pham/ca-phe-sua",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Checkout",
+      "path": "/thanh-toan",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Checkout",
+      "path": "/thanh-toan",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Checkout",
+      "path": "/thanh-toan",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Checkout",
+      "path": "/thanh-toan",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Checkout",
+      "path": "/thanh-toan",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Cart",
+      "path": "/gio",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Cart",
+      "path": "/gio",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Cart",
+      "path": "/gio",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Cart",
+      "path": "/gio",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Cart",
+      "path": "/gio",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Lookup",
+      "path": "/tra-cuu",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Lookup",
+      "path": "/tra-cuu",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Lookup",
+      "path": "/tra-cuu",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Lookup",
+      "path": "/tra-cuu",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Lookup",
+      "path": "/tra-cuu",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Services",
+      "path": "/dich-vu",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Services",
+      "path": "/dich-vu",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Services",
+      "path": "/dich-vu",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Services",
+      "path": "/dich-vu",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Services",
+      "path": "/dich-vu",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Promos",
+      "path": "/khuyen-mai",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Promos",
+      "path": "/khuyen-mai",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Promos",
+      "path": "/khuyen-mai",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Promos",
+      "path": "/khuyen-mai",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Promos",
+      "path": "/khuyen-mai",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Support",
+      "path": "/ho-tro",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Support",
+      "path": "/ho-tro",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Support",
+      "path": "/ho-tro",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Support",
+      "path": "/ho-tro",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "Support",
+      "path": "/ho-tro",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "404",
+      "path": "/khong-co-trang-abc",
+      "width": 360,
+      "scrollW": 360,
+      "clientW": 360,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "404",
+      "path": "/khong-co-trang-abc",
+      "width": 390,
+      "scrollW": 390,
+      "clientW": 390,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "404",
+      "path": "/khong-co-trang-abc",
+      "width": 768,
+      "scrollW": 768,
+      "clientW": 768,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "404",
+      "path": "/khong-co-trang-abc",
+      "width": 1024,
+      "scrollW": 1024,
+      "clientW": 1024,
+      "hOverflow": false,
+      "offenders": []
+    },
+    {
+      "route": "404",
+      "path": "/khong-co-trang-abc",
+      "width": 1440,
+      "scrollW": 1440,
+      "clientW": 1440,
+      "hOverflow": false,
+      "offenders": []
+    }
+  ],
+  "console": [],
+  "a11y": {
+    "localStorageKeys": [
+      "bizops-chat-v1"
+    ],
+    "piiInLocalStorage": false,
+    "tokenInLocalStorage": false,
+    "urlHasToken": false,
+    "innerHtmlUsed": false
+  }
+}

@@ -14,21 +14,27 @@ import QaTab from './tabs/QaTab.jsx';
 import ProductTab from './tabs/ProductTab.jsx';
 
 const TABS = [
-  { id: 'ceo', label: 'CEO' },
-  { id: 'sales', label: 'Sales' },
-  { id: 'finance', label: 'Finance' },
-  { id: 'ops', label: 'Ops/Kho' },
-  { id: 'cskh', label: 'CSKH' },
-  { id: 'marketing', label: 'Marketing' },
-  { id: 'hr', label: 'HR' },
-  { id: 'it', label: 'IT' },
-  { id: 'legal', label: 'Legal' },
-  { id: 'qa', label: 'QA' },
-  { id: 'product', label: 'Product' },
+  { id: 'ceo', label: 'CEO', need: ['orders.read'] },
+  { id: 'sales', label: 'Sales', need: ['orders.write', 'leads.write'] },
+  { id: 'finance', label: 'Finance', need: ['finance.read', 'payments.write'] },
+  { id: 'ops', label: 'Ops/Kho', need: ['stock.write', 'shipments.write', 'po.write'] },
+  { id: 'cskh', label: 'CSKH', need: ['tickets.write', 'chat.write'] },
+  { id: 'marketing', label: 'Marketing', need: ['campaigns.write'] },
+  { id: 'hr', label: 'HR', need: ['hr.read', 'employees.write'] },
+  { id: 'it', label: 'IT', need: ['it.write'] },
+  { id: 'legal', label: 'Legal', need: ['approvals.read', 'audit.read', 'risks.write'] },
+  { id: 'qa', label: 'QA', need: ['qa.write'] },
+  { id: 'product', label: 'Product', need: ['productfeat.write', 'sop.write'] },
 ];
+
+function canSeeTab(perms, role, need) {
+  if (role === 'owner' || role === 'ceo') return true;
+  return (need || []).some((p) => perms.includes(p));
+}
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [perms, setPerms] = useState([]);
   const [tab, setTab] = useState('ceo');
   const [toasts, setToasts] = useState([]);
 
@@ -42,8 +48,14 @@ export default function App() {
     try {
       const data = await api('/api/auth/me');
       setUser(data.user);
+      setPerms(data.permissions || []);
+      // neu tab hien tai khong co quyen -> chuyen ve tab dau tien duoc phep
+      const role = data.user && data.user.role;
+      const allowed = TABS.filter((t) => canSeeTab(data.permissions || [], role, t.need));
+      if (allowed.length && !allowed.some((t) => t.id === tab)) setTab(allowed[0].id);
     } catch {
       setUser(null);
+      setPerms([]);
     }
   }
   useEffect(() => { boot(); }, []);
@@ -68,10 +80,11 @@ export default function App() {
       ) : (
         <>
           <nav className="tabs">
-            {TABS.map((t) => (
+            {TABS.filter((t) => canSeeTab(perms, user && user.role, t.need)).map((t) => (
               <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>{t.label}</button>
             ))}
           </nav>
+          <p style={{ padding: '0 16px', color: '#64748b', fontSize: 13 }}>Vai {user.role} · {perms.length} quyen · tab an theo RBAC (backend enforce 403)</p>
           <main>
             {tab === 'ceo' && <CeoTab toast={toast} />}
             {tab === 'sales' && <SalesTab toast={toast} />}

@@ -79,9 +79,61 @@ const inv = read(path.join(ROOT, 'docs/contract/invariants.sql'));
 ok(inv.includes('I1b') && inv.includes('I8'), 'invariants co I1b + I8');
 ok(!/datetime\s*\(\s*'now'/i.test(inv), 'invariants khong dung datetime(now) rieng sqlite');
 
-// 8. roles: attendance.checkin '*' + users.unlock + chat
+// 8. roles: attendance.checkin '*' + users.unlock + chat + RBAC v6.2 (truong phong / nhan vien ro rang)
 ok(roles.matrix['attendance.checkin'] && roles.matrix['attendance.checkin'][0] === '*', 'attendance.checkin mo cho moi role dang nhap');
 ok(roles.matrix['users.unlock'] && roles.matrix['chat.write'], 'co quyen users.unlock + chat.write');
+for (const p of ['finance.read', 'hr.read', 'qa.write', 'sop.write', 'productfeat.write']) ok(roles.matrix[p] && roles.matrix[p].length > 0, 'co quyen moi ' + p);
+ok(!roles.matrix['finance.read'].includes('sales') && !roles.matrix['finance.read'].includes('warehouse') && !roles.matrix['finance.read'].includes('cskh'), 'sales/kho/cskh khong finance.read');
+ok(!roles.matrix['payments.write'].includes('manager') && !roles.matrix['payments.write'].includes('warehouse'), 'truong phong/kho khong payments.write');
+ok(roles.matrix['qa.write'].includes('staff') && roles.matrix['qa.write'].includes('warehouse'), 'staff/kho duoc qa.write');
+ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse, 'co role_scopes truong phong/nhan vien');
+
+// 9. DB-01 v7: lint cam SQL dac thu SQLite trong src (ngoai db.js + migrations SQLite + seeds demo)
+(function lintSqliteOnly() {
+  const FORBIDDEN = [
+    [/datetime\s*\(/i, 'datetime('],
+    [/date\s*\(\s*'now'/i, "date('now'"],
+    [/strftime\s*\(/i, 'strftime('],
+    [/INSERT\s+OR\s+(IGNORE|REPLACE)/i, 'INSERT OR IGNORE/REPLACE'],
+    [/AUTOINCREMENT/i, 'AUTOINCREMENT'],
+  ];
+  const bad = [];
+  for (const f of files) {
+    const rel = String(f).replace(/\\/g, '/');
+    if (/(common\/db\.js|db\/migrate\.js)$/.test(rel)) continue;
+    if (/db\/migrations\/.*\.sql$/.test(rel) && !/postgres/i.test(rel)) continue;
+    if (/db\/seeds\//.test(rel)) continue;
+    if (!/\.js$/.test(rel)) continue;
+    const src = read(f);
+    const lines = src.split('\n');
+    lines.forEach((line, i) => {
+      // bo qua comment giai thich lint
+      if (/lint trong verify|khong dung datetime|Khong dung datetime/.test(line)) return;
+      for (const [re, tag] of FORBIDDEN) {
+        if (re.test(line)) { bad.push(`${f}:${i + 1} [${tag}] ${line.trim().slice(0, 110)}`); break; }
+      }
+      if (/PRAGMA/i.test(line) && !/db\.js/.test(rel)) bad.push(`${f}:${i + 1} [PRAGMA] ${line.trim().slice(0, 110)}`);
+    });
+  }
+  if (bad.length) { console.log('SQLITE-ONLY VIOLATIONS:\n' + bad.join('\n')); }
+  ok(bad.length === 0, 'khong con SQL dac thu SQLite trong src/ (ngoai db.js/seeds) — DB-01');
+})();
+
+// 10. SEC-02 v7: khong con secret mac dinh trong src + compose
+(function lintSecrets() {
+  const hits = [];
+  const scanRoots = [path.join(ROOT, 'src'), path.join(ROOT, '..', 'agent_svc', 'src')];
+  const { execSync } = require('child_process');
+  try {
+    const out = execSync('git grep -n "dev-agent-key" -- backend/src agent_svc/src docker-compose.yml || true', { cwd: path.join(ROOT, '..'), encoding: 'utf8' });
+    const lines = String(out || '').trim().split('\n').filter(Boolean)
+      .filter((l) => !/FORBIDDEN|_dflt|khoa mac dinh|secret mac dinh|khoa cong khai/i.test(l));
+    for (const l of lines) hits.push(l.slice(0, 140));
+  } catch {}
+  if (hits.length) console.log('SECRET-DEFAULT HITS:\n' + hits.join('\n'));
+  void scanRoots;
+  ok(hits.length === 0, 'khong con khoa mac dinh trong src/compose — SEC-02');
+})();
 
 console.log(fail === 0 ? '\nVERIFY: ALL PASS' : '\nVERIFY: ' + fail + ' FAIL');
 process.exit(fail === 0 ? 0 : 1);

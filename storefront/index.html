@@ -1,5 +1,115 @@
 <!DOCTYPE html>
 <html lang="vi">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>BizOps Café — Đặt món & Teabreak</title></head>
-<body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>BizOps Café — Đặt món &amp; Teabreak</title>
+  <meta name="description" content="BizOps Café — cà phê, trà, bánh &amp; teabreak văn phòng. Giao nội thành 1–2 ngày, đổi trả 7 ngày, tra cứu đơn 2 yếu tố." />
+  <meta name="theme-color" content="#6F4E37" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <meta property="og:site_name" content="BizOps Café" />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="vi_VN" />
+  <!--
+    PRELOAD FONT (spec §7.1): CHI preload 2 file dung o tren-fold.
+    H1 hero + tieu de dung weight 700 (vietnamese subset ~12KB).
+    Weight 400 tai sau (font-display: optional -> khong chan render).
+    Preload tat ca 4 file = 68KB tranh dau bang JS/CSS -> cham LCP.
+  -->
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/be-vietnam-pro-vietnamese-700-normal.woff2" crossorigin />
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/be-vietnam-pro-latin-700-normal.woff2" crossorigin />
+
+  <!--
+    CSS + @font-face duoc INLINE boi Vite plugin (vite.config.js).
+    Ly do (do duoc bang Lighthouse, khong phong doan):
+      - CSS bat dong bo -> trinh duyet style+layout 2 LAN -> "Style & Layout"
+        nhay tu 315ms len 1125ms.
+      - CSS inline -> 1 lan layout, va shell giong HET React ve kich thuoc.
+    Toan bo CSS 43 kB (6.6 kB gzip) nam trong <head> -> khong ton that tai.
+  -->
+</head>
+<body>
+  <!--
+    STATIC SHELL (spec §7.1): H1 co mat san trong HTML de LCP paint ngay,
+    khong phai doi JS tai + phan tich + render React.
+    React se thay the #root khi mount — hinh anh giong het.
+
+    Shell la ROUTE-AWARE (script nho ben duoi): doc duong dan hien tai va chi
+    hien H1 phu hop (Home: hero; trang khac: tieu de trang). Nho vay ung vien
+    LCP cua shell luon KHOP voi trang dang xem — tranh truong hop shell hien
+    hero Home tren trang "Thuc don" (LCP phai doi lai khi React ve).
+  -->
+  <div id="root">
+    <a class="skip-link" href="#main">Bỏ qua tới nội dung</a>
+    <div class="topbar">
+      <div class="wrap">
+        <span>Hotline: 1900-xxxx · Mở cửa 8h–22h · Giao nội thành 1–2 ngày</span>
+        <span>Tra cứu đơn · Hỗ trợ · Khuyến mãi</span>
+      </div>
+    </div>
+    <header class="header">
+      <div class="wrap">
+        <span class="logo">BizOps <span>Café</span></span>
+        <form class="search" role="search"><input aria-label="Tìm món" placeholder="Tìm cà phê, trà, bánh, combo…" readonly /></form>
+        <a class="ui-btn btn-ghost" href="/gio">Giỏ</a>
+      </div>
+    </header>
+    <nav class="nav" aria-label="Danh mục chính">
+      <div class="wrap">
+        <a href="/">Cửa hàng</a><a href="/san-pham">Thực đơn</a><a href="/dich-vu">Dịch vụ</a><a href="/khuyen-mai">Khuyến mãi</a><a href="/tra-cuu">Tra cứu</a><a href="/ho-tro">Hỗ trợ</a>
+      </div>
+    </nav>
+    <main class="wrap" id="main">
+      <section class="hero" data-shell="home">
+        <div>
+          <span class="ui-badge bd-sale">Mở cửa 8h–22h · giao nội thành 1–2 ngày</span>
+          <h1>BizOps Café — sáng năng lượng</h1>
+          <p>Combo sáng siêu tiết kiệm · HĐ VAT 2 ngày · đổi trả 7 ngày khi lỗi NSX</p>
+          <div class="cta">
+            <a class="ui-btn btn-primary ui-btn-lg" href="/san-pham">Đặt món</a>
+            <a class="ui-btn btn-ghost ui-btn-lg" href="/dich-vu">Đặt teabreak</a>
+            <a class="ui-btn btn-ghost ui-btn-lg" href="/tra-cuu">Tra cứu đơn</a>
+          </div>
+        </div>
+        <div class="imgbox" aria-hidden="true" />
+      </section>
+    </main>
+  </div>
+  <!--
+    Route-aware shell: script nho, chay NGAY (khong phai module) -> doi shell
+    truoc khi trinh duyet paint lan dau. Script inline (khong dung `defer`/module)
+    de chay som nhat; dung `<script type="module">` se tre hon.
+  -->
+  <script>
+    (function () {
+      var path = location.pathname;
+      var map = {
+        '/san-pham': ['Thực đơn', 'Cà phê, trà, bánh & combo — giá web theo giờ, giao nội thành 1–2 ngày.'],
+        '/dich-vu': ['Dịch vụ Teabreak', 'Gói trà – bánh – setup tận nơi cho 30–1000 người, có xuất VAT.'],
+        '/gio': ['Giỏ hàng', 'Kiểm tra món và tồn kho trước khi thanh toán.'],
+        '/thanh-toan': ['Thanh toán', 'Điền thông tin giao hàng, chọn cách thanh toán và xác nhận đơn.'],
+        '/xac-nhan': ['Xác nhận đơn', 'Thông tin đơn hàng và tra cứu nhanh.'],
+        '/tra-cuu': ['Tra cứu đơn', 'Nhập mã đơn và SĐT/email để xem trạng thái.'],
+        '/tim-kiem': ['Tìm kiếm', 'Tìm món trong thực đơn BizOps Café.'],
+        '/khuyen-mai': ['Khuyến mãi', 'Ưu đãi đang có cho khách hàng BizOps.'],
+        '/ho-tro': ['Hỗ trợ', 'Câu hỏi thường gặp và thông tin liên hệ.']
+      };
+      var key = path.indexOf('/san-pham/') === 0 ? '/san-pham' : path;
+      var hit = map[key];
+      var main = document.querySelector('main.wrap');
+      if (!hit || !main) return;
+      var hero = main.querySelector('.hero');
+      if (hero) hero.parentNode.removeChild(hero);
+      var h1 = document.createElement('h1');
+      h1.className = 'page-h1';
+      h1.textContent = hit[0];
+      var desc = document.createElement('p');
+      desc.className = 'shell-page-desc';
+      desc.textContent = hit[1];
+      main.appendChild(h1);
+      main.appendChild(desc);
+    })();
+  </script>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
 </html>

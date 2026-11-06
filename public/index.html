@@ -1,0 +1,25 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BizOps AI — Vận hành SME</title>
+<style>body{font-family:system-ui;margin:0;background:#f6f7f9}header{background:#111827;color:#fff;padding:14px 20px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;padding:16px}.card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px #0001}button{background:#111827;color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer}input,textarea,select{width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:8px}table{width:100%;font-size:13px;border-collapse:collapse}td,th{border-bottom:1px solid #eee;padding:6px;text-align:left}.pill{padding:2px 8px;border-radius:20px;font-size:12px}.overdue{background:#fee2e2}.due_soon{background:#fef3c7}.normal{background:#dcfce7}#chat{height:220px;overflow:auto;border:1px solid #eee;border-radius:8px;padding:8px;margin-bottom:8px;background:#fafafa}</style></head>
+<body><header><b>BizOps AI</b> — Đối soát • Công nợ • CSKH • Đa phòng ban (nền tảng riêng)</header>
+<main>
+<div class="card"><h3>🏢 Tổng quan phòng ban</h3><button onclick="loadOverview()">Tải overview</button><pre id="ov"></pre></div>
+<div class="card"><h3>💰 Công nợ</h3><button onclick="loadDebts()">Tải công nợ</button><div id="debts"></div></div>
+<div class="card"><h3>🔁 Đối soát</h3><button onclick="runRec()">Chạy đối soát</button><pre id="rec"></pre>
+<label>Import sao kê CSV (trans_date,amount,content,bank_ref)</label><input type="file" id="csv"><button onclick="upCsv()">Upload + đối soát</button></div>
+<div class="card"><h3>💬 CSKH chat (nền tảng riêng)</h3><div id="chat"></div><input id="cid" placeholder="customer_id (vd 1)"><input id="msg" placeholder="Nhập tin nhắn KH..."><button onclick="sendChat()">Gửi</button>
+<h4>Tickets</h4><button onclick="loadTickets()">Tải tickets</button><div id="tickets"></div></div>
+<div class="card"><h3>➕ Tạo đơn (tự sinh công nợ)</h3><input id="o_code" placeholder="Mã đơn DH003"><input id="o_cid" placeholder="customer_id"><input id="o_amt" placeholder="Số tiền"><button onclick="createOrder()">Tạo</button></div>
+</main>
+<script>
+const api = (u,o)=>fetch(u,{headers:{'Content-Type':'application/json'},...o}).then(r=>r.json());
+async function loadOverview(){ov.textContent=JSON.stringify((await api('/api/departments/overview')).data,null,2)}
+async function loadDebts(){const {data}=await api('/api/debts');debts.innerHTML='<table>'+data.map(d=>`<tr><td>${d.customer_name}</td><td>${d.remain.toLocaleString('vi-VN')}đ</td><td><span class="pill ${d.bucket}">${d.bucket}</span></td><td><button onclick="remind(${d.id})">Nhắc</button></td></tr>`).join('')+'</table>'}
+async function remind(id){const r=await api('/api/debts/'+id+'/remind',{method:'POST'});alert(r.data.message)}
+async function runRec(){rec.textContent=JSON.stringify((await api('/api/reconcile/run',{method:'POST'})).data,null,2)}
+async function upCsv(){const f=csv.files[0];const fd=new FormData();fd.append('file',f);const r=await fetch('/api/transactions/import-csv',{method:'POST',body:fd}).then(r=>r.json());rec.textContent=JSON.stringify(r.data,null,2)}
+async function sendChat(){const r=await api('/api/cskh/chat',{method:'POST',body:JSON.stringify({customer_id:cid.value||1,text:msg.value})});chat.innerHTML+=`<div><b>KH:</b> ${msg.value}</div><div><b>AI:</b> ${r.data.reply}</div>`;msg.value=''}
+async function loadTickets(){const {data}=await api('/api/cskh/tickets');tickets.innerHTML=data.map(t=>`#${t.id} [${t.status}] ${t.subject||''} — ${t.content}`).join('<br>')}
+async function createOrder(){await api('/api/orders',{method:'POST',body:JSON.stringify({code:o_code.value,customer_id:+o_cid.value,amount:+o_amt.value,order_date:new Date().toISOString().slice(0,10)})});alert('Đã tạo + sinh công nợ');loadDebts()}
+loadOverview();loadDebts();
+</script></body></html>

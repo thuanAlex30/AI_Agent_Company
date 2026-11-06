@@ -1,6 +1,6 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
-const { norm, todayVN } = require('../../common/db');
+const { norm, todayVN, sinceVN } = require('../../common/db');
 
 // NOTE: module nay so huu debts/payments/expenses/transactions/reminder_log/budgets.
 // Cap nhat trang thai don goi qua salesService.setOrderPaid (khong UPDATE truc tiep bang cua sales).
@@ -203,7 +203,7 @@ async function financeKpis(conn) {
   const db = require('../../common/db');
   const c = dbConn(conn, db);
   const ar = await c.get("SELECT COALESCE(SUM(amount-paid),0) s FROM debts WHERE type='receivable' AND status IN ('open','overdue')");
-  const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= date('now','-30 days') AND status NOT IN ('cancelled','refunded','draft')");
+  const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
   const rev30 = Number(rev?.s || 0);
   const dso = rev30 > 0 ? Number(ar?.s || 0) / (rev30 / 30) : 0;
   const cash = await c.get('SELECT COALESCE(SUM(CASE WHEN debt_id IS NOT NULL THEN amount ELSE 0 END),0) thu, COALESCE(SUM(CASE WHEN expense_id IS NOT NULL THEN amount ELSE 0 END),0) chi FROM payments');

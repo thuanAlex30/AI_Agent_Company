@@ -1,0 +1,565 @@
+# AI_Agent_Company --- Báo cáo lỗi cần sửa và đề xuất cải tiến
+
+> **Phạm vi:** Rà soát mã nguồn và tài liệu repository
+> `thuanAlex30/AI_Agent_Company`, nhánh `main`.\
+> **Phiên bản được đánh giá:** BizOps AI v6.1 (theo tài liệu trong
+> repository).\
+> **Lưu ý:** Đây là đánh giá tĩnh dựa trên mã nguồn/tài liệu đã đọc,
+> chưa phải kết quả kiểm thử tải, pentest hoặc vận hành production. Các
+> mục ghi "cần xác minh" là rủi ro/điểm cần kiểm thử, không khẳng định
+> đã xảy ra lỗi thực tế.
+
+------------------------------------------------------------------------
+
+## 1. Tổng quan đánh giá
+
+AI_Agent_Company đang được định hướng như một nền tảng **BizOps AI** kết
+hợp:
+
+-   ERP cho các nghiệp vụ Finance, HR, IT, Helpdesk, Marketing, Product,
+    QA, Risk, Sales, Supply và Governance/Approvals.
+-   AI Agent service riêng, sử dụng rule engine, skills và RAG.
+-   ERP frontend và storefront frontend tách biệt.
+-   Backend Node.js/Express theo hướng modular monolith.
+-   Cấu trúc tài liệu tương đối đầy đủ: kiến trúc, BRD, database, API,
+    bảo mật, kiểm thử, vận hành, ADR và roadmap.
+
+**Nhận định:** Nền tảng có nền móng kiến trúc và tư duy nghiệp vụ tốt.
+Chưa nên vội tách toàn bộ hệ thống thành microservices. Ưu tiên hiện tại
+là làm chắc transaction, bảo mật, CI/CD, kiểm thử tính đúng đắn nghiệp
+vụ và chất lượng AI trước khi mở rộng tự động hóa.
+
+## 2. Danh sách lỗi/rủi ro cần xử lý
+
+### 2.1. P0 --- Rủi ro transaction với SQLite khi xử lý bất đồng bộ
+
+**Vị trí:** `backend/src/common/db.js`
+
+**Hiện trạng quan sát được:** - Hàm `tx(fn)` mở transaction trên một kết
+nối `better-sqlite3` dùng chung. - Hàm callback được `await` trong khi
+transaction vẫn đang mở. - Các request khác có thể tiếp tục truy cập
+cùng kết nối trong khoảng thời gian callback bất đồng bộ đang chạy.
+
+**Rủi ro:** - Các thao tác từ request khác có thể vô tình chạy trong
+cùng transaction đang mở. - Có nguy cơ commit/rollback ảnh hưởng tới
+thao tác không thuộc request ban đầu. - Lỗi có thể xuất hiện không ổn
+định khi có nhiều request đồng thời.
+
+**Đề xuất sửa:** 1. Không để transaction trên một SQLite connection dùng
+chung bị xen kẽ bởi nhiều request. 2. Nếu tiếp tục dùng SQLite, triển
+khai mutex/queue để tuần tự hóa toàn bộ transaction trên connection dùng
+chung. 3. Không thực hiện network call hoặc tác vụ chờ lâu bên trong
+transaction. 4. Viết integration test chạy nhiều transaction đồng thời,
+bao gồm commit, rollback và lỗi giữa transaction. 5. Nếu hướng tới
+production nhiều người dùng/ghi đồng thời, ưu tiên PostgreSQL thay vì cố
+mở rộng SQLite.
+
+**Tiêu chí nghiệm thu:** - Không có transaction bị lồng/xen kẽ ngoài dự
+kiến khi chạy concurrency test. - Rollback của request A không làm mất
+dữ liệu hợp lệ của request B. - Kết quả dữ liệu nhất quán sau khi chạy
+test đồng thời lặp lại nhiều lần.
+
+### 2.2. P0 --- CI chưa thực sự kiểm thử PostgreSQL
+
+**Vị trí:** `.github/workflows/ci.yml`
+
+**Hiện trạng quan sát được:** - Workflow có khởi tạo PostgreSQL
+service. - Tuy nhiên backend test đang sử dụng cấu hình SQLite mặc
+định. - Bước được mô tả là kiểm tra PostgreSQL chủ yếu đọc nội dung
+migration và kiểm tra dấu hiệu cú pháp như `CREATE TABLE`, chưa thực thi
+migration và test trên PostgreSQL thật.
+
+**Rủi ro:** - Khác biệt SQL giữa SQLite và PostgreSQL có thể không được
+phát hiện. - Migration, kiểu dữ liệu, constraint, transaction và truy
+vấn có thể chạy trên SQLite nhưng lỗi trên PostgreSQL.
+
+**Đề xuất sửa:** 1. Tạo job riêng cho PostgreSQL trong CI. 2. Cấu hình
+backend kết nối trực tiếp tới PostgreSQL service trong workflow. 3. Chạy
+toàn bộ migration trên database PostgreSQL sạch. 4. Chạy integration
+test backend trên PostgreSQL, không chỉ kiểm tra nội dung file SQL. 5.
+Giữ SQLite test nếu vẫn cần hỗ trợ môi trường local, nhưng phải tách rõ
+hai môi trường test.
+
+**Tiêu chí nghiệm thu:** - CI thực thi migration thành công trên
+PostgreSQL. - Backend integration test chạy với PostgreSQL và có kết quả
+pass/fail thực tế. - Có test cho transaction, foreign key, unique
+constraint và truy vấn nghiệp vụ trọng yếu.
+
+### 2.3. P0 --- Secret mặc định không an toàn cho production
+
+**Vị trí tham khảo:** - `agent_svc/server.js` -
+`agent_svc/src/routes/chat.js` - `docker-compose.yml`
+
+**Hiện trạng quan sát được:** - Một số luồng xác thực nội bộ/public có
+fallback về giá trị `dev-agent-key`. - Docker Compose cũng có giá trị
+mặc định `dev-agent-key` cho các biến khóa. - Agent service đang publish
+port `3100:3100`.
+
+**Rủi ro:** - Nếu triển khai production mà quên cấu hình secret, hệ
+thống có thể chạy với khóa mặc định dễ đoán. - Nếu agent service được
+truy cập từ mạng không tin cậy, bề mặt tấn công tăng lên. - Dùng chung
+một khóa cho nhiều phạm vi làm giảm khả năng cô lập và thu hồi quyền.
+
+**Đề xuất sửa:** 1. Production phải fail-fast nếu thiếu
+`AGENT_INTERNAL_KEY` hoặc `AGENT_PUBLIC_KEY`. 2. Không sử dụng
+`dev-agent-key` làm fallback trong production. 3. Dùng secret riêng cho
+internal API và public API. 4. Tạo khóa có entropy cao, lưu trong secret
+manager hoặc biến môi trường bảo mật. 5. Không publish port agent ra
+internet nếu không cần; chỉ cho backend nội bộ truy cập qua private
+network. 6. Bổ sung cơ chế xoay vòng secret và quy trình thu hồi khóa.
+7. Bổ sung rate limit, request size limit, timeout và audit cho endpoint
+agent.
+
+**Tiêu chí nghiệm thu:** - Production không thể khởi động khi thiếu
+secret bắt buộc. - Khóa nội bộ và public độc lập. - Từ mạng ngoài không
+thể truy cập trực tiếp agent service nếu kiến trúc không yêu cầu. - Có
+test xác thực hợp lệ, sai khóa, thiếu khóa và khóa đã bị thu hồi.
+
+### 2.4. P1 --- RAG hiện thiên về tìm kiếm từ khóa
+
+**Vị trí:** `agent_svc/src/brain/public.js`
+
+**Hiện trạng quan sát được:** - `ragPublic` sử dụng tokenization và chấm
+điểm dựa trên mức độ trùng từ giữa câu hỏi và các đoạn dữ liệu. - Chưa
+thấy triển khai embedding semantic retrieval hoặc reranking trong phần
+mã đã rà soát.
+
+**Hạn chế:** - Khó tìm đúng nội dung khi người dùng diễn đạt khác từ ngữ
+trong tài liệu. - Có thể bỏ sót kết quả liên quan về ngữ nghĩa. - Có thể
+xếp hạng sai khi nhiều đoạn có từ khóa giống nhau nhưng khác ý nghĩa.
+
+**Đề xuất nâng cấp theo từng bước:** 1. Giữ lexical search làm baseline
+và fallback. 2. Thêm embedding cho tài liệu/tri thức có cấu trúc phù
+hợp. 3. Kết hợp hybrid search: keyword + vector. 4. Thêm reranking cho
+top-k kết quả khi cần tăng độ chính xác. 5. Trả về nguồn tham chiếu rõ
+ràng trong câu trả lời. 6. Xây dựng bộ câu hỏi chuẩn để đo Recall@k, MRR
+và groundedness trước/sau nâng cấp.
+
+**Tiêu chí nghiệm thu:** - Có benchmark trên tập câu hỏi đại diện nghiệp
+vụ. - Có nguồn dẫn chứng cho câu trả lời dựa trên tri thức. - Khi không
+tìm được nguồn phù hợp, agent phải nói rõ không đủ dữ liệu thay vì tự
+suy diễn.
+
+### 2.5. P1 --- Đánh giá AI chưa được tích hợp đầy đủ vào CI
+
+**Vị trí tham khảo:** - `agent_svc/scripts/eval-public-chat.js` -
+`.github/workflows/ci.yml`
+
+**Hiện trạng quan sát được:** - Có bộ eval public chat với các trường
+hợp thông thường và adversarial. - Kiểm tra hiện tại có sử dụng
+pattern/regex. - Workflow CI chưa chạy bộ `eval-public-chat.js`.
+
+**Rủi ro:** - Thay đổi prompt, skill hoặc retrieval có thể làm giảm chất
+lượng mà CI không phát hiện. - Regex đơn giản không đủ chứng minh agent
+chống được rò rỉ dữ liệu qua nhiều lượt hội thoại. - Chưa đủ bằng chứng
+tự động về khả năng giữ ranh giới role, quyền truy cập và nguồn dữ liệu.
+
+**Đề xuất sửa:** 1. Tích hợp public-chat eval vào CI. 2. Tách bộ test
+theo nhóm: chất lượng trả lời, groundedness, prompt injection, data
+leakage, role isolation, refusal và tool permission. 3. Bổ sung test
+multi-turn, không chỉ từng câu hỏi độc lập. 4. Tạo dữ liệu giả lập có
+phân loại nhạy cảm để kiểm tra rò rỉ. 5. Kiểm tra agent không thể gọi
+tool vượt quyền của user. 6. Lưu kết quả eval theo phiên bản
+prompt/model/dataset để so sánh hồi quy. 7. Dùng ngưỡng pass/fail cho
+các tiêu chí quan trọng; trường hợp rủi ro cao phải chặn merge.
+
+**Tiêu chí nghiệm thu:** - CI chạy cả eval thông thường và
+adversarial. - Có test đa lượt và kiểm tra phân quyền. - Không có lỗi rò
+rỉ dữ liệu nghiêm trọng trong bộ regression. - Có báo cáo kết quả eval
+theo từng lần chạy.
+
+### 2.6. P1 --- Storefront chưa được build trong CI
+
+**Vị trí:** `.github/workflows/ci.yml`
+
+**Hiện trạng quan sát được:** - Workflow có build frontend ERP. - Chưa
+thấy bước build storefront tương ứng.
+
+**Rủi ro:** - Lỗi dependency, TypeScript/JSX hoặc cấu hình build của
+storefront có thể lọt qua CI. - Trạng thái CI xanh không đồng nghĩa toàn
+bộ frontend có thể build.
+
+**Đề xuất sửa:** 1. Thêm bước cài dependency và build storefront. 2. Nếu
+có lint/typecheck riêng, thêm vào pipeline. 3. Có thể tách job frontend
+ERP và storefront để dễ chẩn đoán lỗi. 4. Đảm bảo CI dùng lockfile và
+phiên bản Node thống nhất.
+
+**Tiêu chí nghiệm thu:** - CI build thành công cả ERP frontend và
+storefront. - Pull request bị chặn khi một trong hai frontend build thất
+bại.
+
+------------------------------------------------------------------------
+
+## 3. Các hạng mục cần kiểm thử chuyên sâu
+
+Các mục sau là **điểm cần xác minh**, chưa kết luận là lỗi đã xảy ra:
+
+  ------------------------------------------------------------------------
+  Hạng mục                Rủi ro cần kiểm tra     Hướng kiểm thử
+  ----------------------- ----------------------- ------------------------
+  Scheduler và timezone   `date('now')` của       Test deadline quanh
+                          SQLite có thể khác kỳ   00:00, cuối tháng và
+                          vọng múi giờ nghiệp vụ  chuyển ngày
+                          Việt Nam                
+
+  Kiểm tra tồn kho        Hai đơn hàng đồng thời  Concurrency test và kiểm
+                          có thể cùng đọc một     tra
+                          lượng tồn trước khi ghi transaction/constraint
+                          giảm                    
+
+  Idempotency             Hai request cùng key có Unique constraint ở DB
+                          thể đến đồng thời       và test gửi request song
+                                                  song
+
+  Finance payment         Cập nhật thanh toán và  Test rollback và race
+                          công nợ có thể không    condition
+                          nguyên tử nếu tách      
+                          transaction             
+
+  Approval workflow       Hai approver hoặc hai   Test
+                          request có thể xử lý    optimistic/pessimistic
+                          cùng một approval       locking và state
+                                                  transition
+
+  CORS/Auth/session       Cấu hình production có  Kiểm tra origin
+                          thể rộng hơn cần thiết  allowlist, cookie flags,
+                                                  token expiry và CSRF tùy
+                                                  cơ chế auth
+
+  Backup/restore          Có backup nhưng chưa    Diễn tập restore định kỳ
+                          chắc khôi phục được     và đo RPO/RTO
+
+  Observability           Thiếu trace xuyên       Correlation ID,
+                          backend-agent có thể    structured logs, metrics
+                          khó điều tra sự cố      và alert
+  ------------------------------------------------------------------------
+
+### Nguyên tắc kiểm thử nghiệp vụ
+
+-   Kiểm tra cả trường hợp hợp lệ, không hợp lệ và đồng thời.
+-   Kiểm tra quyền tại backend, không chỉ ẩn nút trên frontend.
+-   Kiểm tra state transition ở tầng service/domain và ràng buộc
+    database.
+-   Mọi thao tác tài chính, kho, phê duyệt và thay đổi quyền cần audit
+    trail.
+-   Test rollback để bảo đảm không có dữ liệu dở dang.
+
+------------------------------------------------------------------------
+
+## 4. Đề xuất cải tiến mang tính đột phá
+
+### 4.1. Business Copilot --- Trợ lý điều hành doanh nghiệp
+
+**Mục tiêu:** Chuyển AI từ công cụ hỏi đáp thành trợ lý giúp lãnh đạo
+nắm tình hình và ra quyết định.
+
+Ví dụ câu hỏi: - "Hôm nay tôi cần ưu tiên xử lý việc gì?" - "Bộ phận nào
+đang có nguy cơ trễ SLA?" - "Dòng tiền 30 ngày tới có rủi ro gì?" - "Đơn
+hàng nào có nguy cơ thiếu hàng hoặc giao trễ?"
+
+**Cách triển khai:** 1. Xây dựng bộ KPI và định nghĩa nghiệp vụ thống
+nhất. 2. Cung cấp các công cụ truy vấn dữ liệu có phân quyền cho AI. 3.
+AI tổng hợp số liệu, nêu nguyên nhân và dẫn nguồn. 4. Đưa ra đề xuất
+hành động, mức độ ưu tiên và tác động dự kiến. 5. Chỉ thực hiện hành
+động sau khi qua policy/approval phù hợp.
+
+**Giá trị:** Lãnh đạo không chỉ nhận báo cáo mà còn nhận được danh sách
+hành động có căn cứ.
+
+### 4.2. Agent Orchestration --- Hệ thống nhiều AI Agent phối hợp
+
+Có thể tổ chức các agent chuyên trách: - Sales Agent: khách hàng,
+pipeline, cơ hội bán hàng. - Finance Agent: công nợ, dòng tiền, chi
+phí. - Supply Agent: tồn kho, mua hàng, nhà cung cấp. - HR Agent: nhân
+sự, lịch làm việc, nhu cầu tuyển dụng. - CSKH Agent: yêu cầu hỗ trợ và
+mức độ hài lòng. - Risk Agent: cảnh báo bất thường và rủi ro vận hành.
+
+**Điều kiện bắt buộc trước khi tự động hóa:** - Tool permission theo
+role và phạm vi dữ liệu. - Policy engine kiểm tra điều kiện nghiệp vụ. -
+Approval cho hành động có tác động lớn. - Idempotency để tránh thực hiện
+trùng. - Audit log đầy đủ. - Giới hạn ngân sách, số lần gọi tool và thời
+gian chạy. - Cơ chế dừng/rollback hoặc quy trình bù trừ khi thất bại.
+
+**Nguyên tắc:** Agent đề xuất trước; chỉ tự thực hiện những hành động
+rủi ro thấp đã được cho phép rõ ràng.
+
+### 4.3. Predictive BI --- Phân tích và dự báo chủ động
+
+Ưu tiên các bài toán có dữ liệu lịch sử: - Dự báo dòng tiền và công
+nợ. - Dự báo nhu cầu/tồn kho. - Dự báo doanh số. - Dự báo nguy cơ trễ
+SLA. - Phát hiện biến động chi phí bất thường. - Dự báo nhu cầu nhân sự.
+
+**Kiến trúc khuyến nghị:** - SQL/warehouse hoặc data mart cho dữ liệu
+chuẩn hóa. - Statistical/ML model thực hiện dự báo. - LLM giải thích kết
+quả, tóm tắt nguyên nhân và đề xuất hành động.
+
+Không nên dùng LLM để thay thế mô hình dự báo số liệu khi bài toán cần
+độ chính xác định lượng.
+
+### 4.4. Workflow Engine --- Chuẩn hóa quy trình tự động
+
+Các quy trình phù hợp: - Đề nghị mua hàng → phê duyệt → tạo đơn mua →
+nhận hàng. - Yêu cầu IT → phân loại → giao việc → xử lý → xác nhận. -
+Thanh toán → kiểm tra điều kiện → phê duyệt → ghi nhận. - Onboarding
+nhân viên → cấp tài khoản → cấp thiết bị → đào tạo.
+
+**Nên có:** - Trạng thái và state machine rõ ràng. - Timeout, SLA, retry
+và escalation. - Phân quyền theo vai trò. - Lịch sử thay đổi. -
+Idempotency và xử lý tác vụ trùng. - Cơ chế bù trừ khi workflow thất bại
+giữa chừng.
+
+Có thể bắt đầu bằng workflow engine nội bộ. Chỉ cân nhắc nền tảng như
+Temporal khi độ phức tạp, độ dài workflow và yêu cầu độ bền thực thi
+thực sự cần thiết.
+
+### 4.5. Enterprise Knowledge Graph --- Bản đồ tri thức doanh nghiệp
+
+Liên kết các thực thể: - Nhân viên ↔ phòng ban ↔ nhiệm vụ. - Khách hàng
+↔ đơn hàng ↔ hóa đơn ↔ thanh toán. - Sản phẩm ↔ tồn kho ↔ nhà cung
+cấp. - Sự cố ↔ hệ thống ↔ thay đổi ↔ người xử lý. - Quy trình ↔ chính
+sách ↔ phê duyệt.
+
+**Lợi ích:** AI có thể truy vết quan hệ giữa dữ liệu thay vì chỉ tìm các
+đoạn văn bản gần giống câu hỏi.
+
+**Lộ trình:** Bắt đầu bằng quan hệ SQL, view hoặc materialized view. Chỉ
+dùng graph database khi truy vấn quan hệ nhiều bước trở thành nhu cầu
+thực tế và có benchmark chứng minh lợi ích.
+
+------------------------------------------------------------------------
+
+## 5. Kiến trúc mục tiêu đề xuất --- BizOps AI 7.0
+
+Không cần thay toàn bộ kiến trúc hiện tại. Nên nâng cấp theo hướng giữ
+modular monolith cho business core, tách AI service và bổ sung nền tảng
+dữ liệu/sự kiện.
+
+``` text
+┌──────────────────────────────────────────────────────────┐
+│                    EXPERIENCE LAYER                      │
+│       ERP Web | Storefront | Mobile | Executive Copilot   │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│                  AI INTELLIGENCE LAYER                    │
+│  Agent Orchestrator | RAG/Hybrid Search | Predictive BI   │
+│  Tool Registry | Context Builder | Evaluation             │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│              AUTOMATION & GOVERNANCE LAYER                │
+│  Workflow Engine | Policy Engine | Approval | Audit      │
+│  Idempotency | Rate Limit | Human-in-the-loop             │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│                    BUSINESS CORE                         │
+│ Finance | HR | Sales | Supply | Product | IT | QA | Risk  │
+│              Modular Monolith / Domain Services          │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│                   DATA INFRASTRUCTURE                     │
+│ PostgreSQL | Redis (khi cần) | Object Storage             │
+│ Event/Outbox | Search/Vector Index | Analytics Data Mart  │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Nguyên tắc kiến trúc
+
+1.  **Giữ modular monolith:** Chưa tách microservices chỉ vì muốn dùng
+    kiến trúc mới.
+2.  **Database là nguồn sự thật:** AI không được tự tạo hoặc sửa dữ liệu
+    nghiệp vụ ngoài API/tool có kiểm soát.
+3.  **Transactional outbox:** Ghi sự kiện nghiệp vụ cùng transaction với
+    dữ liệu chính; worker phát sự kiện sau commit.
+4.  **Policy trước tool:** Mọi lệnh AI gọi vào hệ thống phải qua xác
+    thực, phân quyền và policy.
+5.  **Human-in-the-loop:** Tác vụ nhạy cảm phải có người phê duyệt.
+6.  **Observability xuyên suốt:** Dùng correlation ID để nối request từ
+    frontend → backend → agent → tool.
+7.  **Tách dữ liệu public/private:** Không để RAG public truy cập nguồn
+    dữ liệu nội bộ nếu chưa có lớp kiểm soát rõ ràng.
+
+------------------------------------------------------------------------
+
+## 6. Roadmap triển khai đề xuất
+
+  -----------------------------------------------------------------------
+  Giai đoạn         Trọng tâm         Công việc chính   Kết quả mong đợi
+  ----------------- ----------------- ----------------- -----------------
+  Phase 1 ---       Ổn định nền tảng  Sửa transaction,  Nền tảng ổn định
+  Stabilize v6.1                      secret,           và có CI đáng tin
+                                      PostgreSQL CI,    cậy
+                                      race condition,   
+                                      idempotency,      
+                                      build storefront  
+
+  Phase 2 ---       AI hỗ trợ điều    KPI chuẩn, query  Lãnh đạo hỏi dữ
+  Business Copilot  hành              tools có phân     liệu và nhận đề
+                                      quyền, nguồn dẫn  xuất hành động
+                                      chứng, dashboard  
+                                      ưu tiên           
+
+  Phase 3 --- Agent Phối hợp nhiều    Tool registry,    Agent phối hợp
+  Orchestration     agent             policy, approval, nhưng không vượt
+                                      audit,            quyền
+                                      idempotency, giới 
+                                      hạn thực thi      
+
+  Phase 4 ---       Dự báo và cảnh    Data mart, mô     Cảnh báo sớm thay
+  Predictive        báo               hình dự báo,      vì chỉ báo cáo
+  Intelligence                        anomaly           quá khứ
+                                      detection, đánh   
+                                      giá độ chính xác  
+
+  Phase 5 ---       Sẵn sàng thương   Multi-tenant,     Có nền tảng để
+  Productization    mại hóa           billing, tenant   cung cấp cho
+                                      isolation,        nhiều doanh
+                                      backup/restore,   nghiệp
+                                      monitoring,       
+                                      onboarding        
+  -----------------------------------------------------------------------
+
+### Thứ tự ưu tiên khuyến nghị
+
+**Làm ngay:** 1. Loại bỏ secret mặc định khỏi production. 2. Sửa/kiểm
+soát transaction SQLite hoặc chuyển PostgreSQL. 3. Chạy migration và
+test thực tế trên PostgreSQL trong CI. 4. Bổ sung build storefront vào
+CI. 5. Chạy public-chat eval và bổ sung kiểm thử phân quyền/rò rỉ dữ
+liệu.
+
+**Làm tiếp theo:** 6. Kiểm thử race condition ở kho, tài chính, approval
+và idempotency. 7. Chuẩn hóa timezone và scheduler. 8. Nâng cấp RAG theo
+hybrid retrieval và source grounding. 9. Xây dựng Business Copilot trước
+khi triển khai agent tự động hóa diện rộng.
+
+------------------------------------------------------------------------
+
+## 7. Đánh giá định tính hiện tại
+
+Các điểm dưới đây là nhận định định tính từ rà soát mã nguồn/tài liệu,
+không phải điểm benchmark hay chứng nhận an toàn.
+
+  ------------------------------------------------------------------------
+  Tiêu chí                            Điểm tham khảo Nhận xét
+  --------------------- ---------------------------- ---------------------
+  Kiến trúc tổng thể                            8/10 Modular monolith phù
+                                                     hợp, phân lớp tương
+                                                     đối rõ
+
+  Nền tảng ERP                                  8/10 Phạm vi nghiệp vụ
+                                                     rộng, có tư duy kiểm
+                                                     soát quy trình
+
+  Thiết kế dữ liệu                            7.5/10 Có nền tảng tốt, cần
+                                                     kiểm chứng
+                                                     concurrency và tính
+                                                     nhất quán
+
+  Thiết kế bảo mật                              7/10 Có định hướng
+                                                     guardrails, cần xử lý
+                                                     secret và kiểm thử
+                                                     thực tế
+
+  AI Guardrails                               7.5/10 Có tư duy giới hạn và
+                                                     phân tách
+                                                     public/private
+
+  Mức độ thông minh của                         5/10 RAG và eval còn dư
+  AI                                                 địa cải thiện
+
+  Tự động hóa nghiệp vụ                       5.5/10 Có nền tảng nhưng cần
+                                                     workflow
+                                                     orchestration rõ ràng
+                                                     hơn
+
+  Sẵn sàng production                         5.5/10 Cần củng cố CI, DB,
+                                                     secrets,
+                                                     observability và vận
+                                                     hành
+
+  Khả năng thương mại                           6/10 Có tiềm năng, cần
+  hóa                                                multi-tenant và vận
+                                                     hành SaaS
+  ------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+## 8. Định hướng chiến lược
+
+Lợi thế cạnh tranh không nên chỉ nằm ở việc tích hợp một mô hình AI mới.
+Lợi thế dài hạn nên đến từ:
+
+1.  **Hiểu nghiệp vụ sâu:** Nắm được quy trình, quy tắc, ngoại lệ và
+    trách nhiệm trong doanh nghiệp.
+2.  **Dữ liệu có cấu trúc và đáng tin:** AI truy cập đúng dữ liệu, đúng
+    quyền và có thể dẫn nguồn.
+3.  **Khả năng chuyển insight thành hành động:** Đề xuất có căn cứ,
+    workflow có kiểm soát và đo được kết quả.
+4.  **An toàn và truy vết:** Mọi hành động quan trọng đều có policy,
+    approval và audit.
+5.  **Đo lường hiệu quả:** Chứng minh hệ thống giảm thời gian xử lý,
+    giảm lỗi, giảm tồn kho hoặc cải thiện doanh thu.
+
+**Kết luận:** Hướng đi phù hợp là phát triển AI_Agent_Company từ ERP có
+tích hợp AI thành **Business Operating System có AI hỗ trợ ra quyết định
+và tự động hóa có kiểm soát**. Tuy nhiên, bước nhảy vọt nên bắt đầu bằng
+việc làm chắc nền tảng v6.1; không nên xây thêm nhiều agent trước khi
+transaction, bảo mật, CI và đánh giá AI đạt tiêu chuẩn đáng tin cậy.
+
+------------------------------------------------------------------------
+
+## 9. Checklist nghiệm thu trước khi công bố bản nâng cấp
+
+### Nền tảng và dữ liệu
+
+-   [ ] Transaction an toàn khi có request đồng thời.
+-   [ ] Migration chạy thành công trên PostgreSQL sạch.
+-   [ ] Integration test chạy trực tiếp trên PostgreSQL.
+-   [ ] Có unique constraint cho idempotency và các invariant quan
+    trọng.
+-   [ ] Kiểm thử race condition ở kho, tài chính và approval.
+-   [ ] Scheduler xử lý timezone nghiệp vụ nhất quán.
+
+### Bảo mật và quản trị
+
+-   [ ] Không còn secret mặc định trong production.
+-   [ ] Internal/public key tách biệt và có quy trình rotation.
+-   [ ] Agent service không public trực tiếp nếu không cần.
+-   [ ] Backend kiểm tra quyền ở mọi thao tác nhạy cảm.
+-   [ ] Có audit log cho hành động tài chính, kho, phê duyệt và AI tool.
+-   [ ] Có rate limit, timeout và giới hạn payload.
+
+### CI/CD và chất lượng
+
+-   [ ] CI build ERP frontend.
+-   [ ] CI build storefront.
+-   [ ] CI chạy backend test trên PostgreSQL.
+-   [ ] CI chạy agent test.
+-   [ ] CI chạy public-chat eval.
+-   [ ] Có adversarial và multi-turn tests.
+-   [ ] Có kiểm thử phân quyền và rò rỉ dữ liệu.
+
+### AI và tự động hóa
+
+-   [ ] RAG trả nguồn tham chiếu.
+-   [ ] Có fallback khi không đủ dữ liệu.
+-   [ ] Tool registry có schema và permission rõ ràng.
+-   [ ] Tác vụ nhạy cảm yêu cầu approval.
+-   [ ] Tool calls có idempotency và audit.
+-   [ ] Có bộ benchmark chất lượng AI theo phiên bản.
+
+### Vận hành
+
+-   [ ] Có structured logs và correlation ID.
+-   [ ] Có metrics và cảnh báo.
+-   [ ] Backup được kiểm tra bằng diễn tập restore.
+-   [ ] Có runbook xử lý sự cố.
+-   [ ] Có mục tiêu RPO/RTO phù hợp.
+
+------------------------------------------------------------------------
+
+**Tài liệu này là backlog định hướng kỹ thuật.** Trước khi sửa mã nguồn,
+nên chuyển từng mục thành issue có owner, mức độ ưu tiên, phạm vi thay
+đổi, test case và tiêu chí nghiệm thu cụ thể.

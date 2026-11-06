@@ -1,5 +1,6 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
+const cfg = require('../config');
 const { ok, fail } = require('../errors');
 const cskh = require('../brain/cskh');
 const pub = require('../brain/public');
@@ -8,11 +9,24 @@ const router = express.Router();
 
 const isTest = process.env.NODE_ENV === 'test';
 const limitHandler = (req, res) => res.status(429).json({ ok: false, error: { code: 'RATE_LIMIT', message: 'Qua nhieu request, thu lai sau' } });
-const publicLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: isTest ? 200 : 10, standardHeaders: true, legacyHeaders: false, handler: limitHandler });
+// AVAIL-01 FIX v7: gioi han theo IP THAT cua khach (backend gui x-client-ip),
+// khong gom moi khach thanh 1 IP backend. Chi an toan khi :3100 khong public (xem SEC-02).
+// Dong thoi gioi han dong thoi de chong flood 1 client.
+let concurrent = 0;
+const MAX_CONCURRENT = 50;
+const publicLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, max: isTest ? 200 : 10, standardHeaders: true, legacyHeaders: false, handler: limitHandler,
+  keyGenerator: (req) => String(req.headers['x-client-ip'] || req.ip || 'unknown').slice(0, 64),
+});
+function concurrentGuard(req, res, next) {
+  if (concurrent >= MAX_CONCURRENT) return limitHandler(req, res);
+  concurrent++;
+  res.on('finish', () => { concurrent = Math.max(0, concurrent - 1); });
+  return next();
+}
 
 function checkKey(req, res, next) {
-  const want = process.env.AGENT_INTERNAL_KEY || 'dev-agent-key';
-  if (req.headers['x-agent-key'] !== want) {
+  if (!cfg.checkInternalKey(req.headers['x-agent-key'])) {
     return res.status(401).json({ ok: false, error: { code: 'AUTH', message: 'Agent key khong hop le' } });
   }
   return next();
@@ -20,10 +34,9 @@ function checkKey(req, res, next) {
 
 // POST /public-chat — kênh công khai storefront (key riêng + limiter riêng, trước checkKey nội bộ)
 // Chỉ đọc knowledge_public + giá bán published; cấm cost/lương/tồn số.
-router.post('/public-chat', publicLimiter, async (req, res) => {
+router.post('/public-chat', concurrentGuard, publicLimiter, async (req, res) => {
   try {
-    const want = process.env.AGENT_PUBLIC_KEY || process.env.AGENT_INTERNAL_KEY || 'dev-agent-key';
-    if (req.headers['x-agent-key'] !== want) {
+    if (!cfg.checkPublicKey(req.headers['x-agent-key'])) {
       return res.status(401).json({ ok: false, error: { code: 'AUTH', message: 'Agent key khong hop le' } });
     }
     const out = await pub.publicChatReply(null, {

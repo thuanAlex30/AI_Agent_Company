@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Home",
+    "path": "/",
+    "perf": 97,
+    "a11y": 100,
+    "bp": 100,
+    "seo": 100,
+    "LCP": 2056,
+    "FCP": 1650,
+    "CLS": 0,
+    "TBT": 119
+  },
+  {
+    "name": "Catalog",
+    "path": "/san-pham",
+    "perf": 84,
+    "a11y": 100,
+    "bp": 100,
+    "seo": 100,
+    "LCP": 1887,
+    "FCP": 1427,
+    "CLS": 0,
+    "TBT": 576
+  },
+  {
+    "name": "Detail",
+    "path": "/san-pham/ca-phe-sua",
+    "perf": 82,
+    "a11y": 100,
+    "bp": 100,
+    "seo": 100,
+    "LCP": 2229,
+    "FCP": 1429,
+    "CLS": 0,
+    "TBT": 653
+  },
+  {
+    "name": "Checkout",
+    "path": "/thanh-toan",
+    "perf": 98,
+    "a11y": 100,
+    "bp": 100,
+    "seo": 100,
+    "LCP": 1659,
+    "FCP": 1507,
+    "CLS": 0,
+    "TBT": 157
+  }
+]

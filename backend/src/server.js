@@ -1,6 +1,7 @@
 const express = require('express');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
+require('./config'); // SEC-02 v7: fail-fast secrets ngay khi boot (prod thieu/yeu -> throw, khong khoi dong)
 const { applySecurity, apiLimiter } = require('./common/security');
 const { errorHandler, ok } = require('./common/errors');
 const authRoutes = require('./routes/auth');
@@ -19,6 +20,8 @@ const publicWebhook = require('./public/webhook');
 const publicChat = require('./public/chat');
 
 const app = express();
+// PAY-01 FIX v7: webhook ky tren BYTE THO — mount express.raw() RIENG cho duong nay TRUOC json toan cuc
+app.use('/api/public/payments/webhook', express.raw({ type: '*/*', limit: '100kb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 applySecurity(app);
