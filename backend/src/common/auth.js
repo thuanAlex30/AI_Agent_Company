@@ -318,6 +318,54 @@ async function bumpAuthVersion(userId) {
   return true;
 }
 
+/**
+ * ENTERPRISE-AUTH-01: doi mat khau cua CHINH user goi.
+ *
+ * Quy tac:
+ *   - Phai biet mat khau cu (chong session bi cuop doi mat khau).
+ *   - Mat khau moi >= 8 ky tu, co chu + so (policy toi thieu).
+ *   - Khong duoc trung mat khau cu.
+ *   - Doi xong: tang auth_version (vo hieu hoa MOI access token cu NGAY),
+ *     thu hoi TOAN BO refresh session (ke ca phien hien tai) — user phai
+ *     dang nhap lai. Audit trong CUNG transaction (INV-2).
+ */
+function checkPasswordPolicy(pw) {
+  const s = String(pw || '');
+  if (s.length < 8) throw new AppError('VALIDATION', 'Mat khau moi phai >= 8 ky tu', 400, { fields: ['new_password'] });
+  if (s.length > 128) throw new AppError('VALIDATION', 'Mat khau moi qua dai (toi da 128 ky tu)', 400, { fields: ['new_password'] });
+  if (!/[A-Za-z]/.test(s) || !/[0-9]/.test(s)) {
+    throw new AppError('VALIDATION', 'Mat khau moi phai co ca chu va so', 400, { fields: ['new_password'] });
+  }
+  return s;
+}
+
+async function changePassword(userId, oldPassword, newPassword) {
+  const uid = Number(userId);
+  if (!Number.isInteger(uid) || uid <= 0) throw new AppError('VALIDATION', 'User id khong hop le', 400);
+  if (!oldPassword) throw new AppError('VALIDATION', 'Thieu mat khau cu', 400, { fields: ['old_password'] });
+  if (!newPassword) throw new AppError('VALIDATION', 'Thieu mat khau moi', 400, { fields: ['new_password'] });
+  const pw = checkPasswordPolicy(newPassword);
+  const db = require('./db');
+  const { writeAudit } = require('./audit');
+  const user = await db.get('SELECT * FROM users WHERE id=?', [uid]);
+  if (!user) throw new AppError('NOT_FOUND', 'Khong tim thay tai khoan', 404);
+  const okPwd = await bcrypt.compare(String(oldPassword), user.password_hash);
+  if (!okPwd) throw new AppError('AUTH', 'Mat khau cu khong dung', 401);
+  const sameAsOld = await bcrypt.compare(pw, user.password_hash);
+  if (sameAsOld) throw new AppError('VALIDATION', 'Mat khau moi khong duoc trung mat khau cu', 400, { fields: ['new_password'] });
+  const hash = await bcrypt.hash(pw, 10);
+  await db.tx(async (c) => {
+    await c.run('UPDATE users SET password_hash=?, failed_attempts=0, locked_until=NULL, auth_version = COALESCE(auth_version,1) + 1 WHERE id=?', [hash, uid]);
+    await c.run(
+      "UPDATE refresh_tokens SET revoked=TRUE, revoked_reason='password_change' WHERE user_id=? AND revoked IS NOT TRUE",
+      [uid]
+    );
+    await writeAudit(c, String(user.username), 'security.password_change', 'users', uid, null, { changed: true });
+  });
+  logger.info('password changed — thu hoi toan bo session', { user_id: uid });
+  return { changed: true };
+}
+
 async function authenticate(req, res, next) {  // dev-only: x-user-code (cam o prod)
   if (req.headers['x-user-code'] && process.env.NODE_ENV !== 'production') {
     logger.warn('x-user-code dev-only', { code: req.headers['x-user-code'] });
@@ -415,5 +463,5 @@ function userPermissions(role) {
 module.exports = {
   login, refresh, logout, logoutAll, authenticate, requirePerm, filterEmployeeRow,
   userPermissions, signAccess, actorId, deviceLabel, listSessions, revokeSession,
-  bumpAuthVersion, ACCESS_TTL, ACCESS_TTL_MINUTES, REFRESH_DAYS, MAX_SESSIONS,
+  bumpAuthVersion, changePassword, checkPasswordPolicy, ACCESS_TTL, ACCESS_TTL_MINUTES, REFRESH_DAYS, MAX_SESSIONS,
 };

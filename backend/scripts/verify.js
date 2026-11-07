@@ -308,7 +308,9 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
     const out = new Set();
     const re = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/gi;
     let m;
-    while ((m = re.exec(sql))) out.add(m[1].toLowerCase());
+    // Bo qua bang tam `*_new` (vd qa_checks_new trong migration 007: tao
+    // bang moi -> chep du lieu -> doi ten; khong phai bang nghiep vu that).
+    while ((m = re.exec(sql))) { const n = m[1].toLowerCase(); if (!n.endsWith('_new')) out.add(n); }
     return out;
   }
   const tSql = tablesOf(migAll);
@@ -1308,7 +1310,9 @@ function mutationRoutes(src) {
   const migPg7 = read(path.join(ROOT, 'src/db/migrations/007_qa_ref_id_text.postgres.sql'));
   ok(/ref_id\s+TEXT\s+NOT\s+NULL/i.test(mig7), 'PG-DB-08: migration 007 SQLite doi qa_checks.ref_id sang TEXT');
   ok(/ALTER\s+COLUMN\s+ref_id\s+TYPE\s+TEXT/i.test(migPg7), 'PG-DB-08: migration 007 PG doi qa_checks.ref_id sang TEXT');
-  const qaSvc = read(path.join(ROOT, 'src/modules/qa/service.js'));
+  const qaSvcRaw = read(path.join(ROOT, 'src/modules/qa/service.js'));
+  // Loai comment (//, *, --) truoc khi kiem tra — tranh bat nham SQL trong comment giai thich bug.
+  const qaSvc = qaSvcRaw.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l) && !/^\s*--/.test(l)).join('\n');
   ok(!/SELECT id FROM products WHERE id=/i.test(qaSvc), 'PG-DB-08: qa/service.js KHONG truy van products.id (bang products khoa SKU)');
   ok(/sku/.test(qaSvc), 'PG-DB-08: qa/service.js kiem tra ton tai san pham theo sku');
 
@@ -1322,7 +1326,9 @@ function mutationRoutes(src) {
   ok(trigHelper.length > 0, 'PG-DB-06: co helper trigger dialect-aware (tests/helpers/triggers.js)');
   let sqliteOnlyTrig = 0;
   for (const f of fs.readdirSync(testDir).filter((x) => x.endsWith('.test.js'))) {
-    const src = read(path.join(testDir, f));
+    const raw = read(path.join(testDir, f));
+    // Loai comment (//, *, --) — tranh bat nham SQL trong comment giai thich bug (vd dialect-regression.test.js).
+    const src = raw.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l) && !/^\s*--/.test(l)).join('\n');
     if (/DROP\s+TRIGGER\s+IF\s+EXISTS\s+\w+\s*(;|'|")/i.test(src)) sqliteOnlyTrig++;
     if (/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS/i.test(src)) sqliteOnlyTrig++;
   }

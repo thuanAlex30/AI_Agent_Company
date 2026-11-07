@@ -1,7 +1,7 @@
 const express = require('express');
 const {
   login, refresh, logout, logoutAll, authenticate, userPermissions,
-  listSessions, revokeSession,
+  listSessions, revokeSession, changePassword,
 } = require('../common/auth');
 const { ok, fail } = require('../common/errors');
 const { loginLimiter, loginUserLimiter, refreshLimiter, newCsrfToken } = require('../common/security');
@@ -116,6 +116,23 @@ router.get('/me', authenticate, async (req, res) => {
         denied: s.denied,
       },
     });
+  } catch (e) { return fail(res, e); }
+});
+
+// ENTERPRISE-AUTH-01: doi mat khau cua chinh user goi (can CSRF + auth).
+// Doi xong thu hoi TOAN BO session (ke ca phien hien tai) => FE phai login lai.
+router.post('/change-password', authenticate, async (req, res) => {
+  try {
+    const out = await changePassword(
+      req.user.id,
+      (req.body && req.body.old_password) || null,
+      (req.body && req.body.new_password) || null
+    );
+    const opts = cookieOptions(0);
+    res.clearCookie('access_token', opts);
+    res.clearCookie('refresh_token', opts);
+    res.clearCookie('csrf_token', csrfCookieOptions(0));
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 

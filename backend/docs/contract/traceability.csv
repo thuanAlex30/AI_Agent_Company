@@ -84,3 +84,6 @@ SEC-09,Login/refresh/session — vong doi refresh token + reuse detection,refres
 QA-07,Phase 6 ops — readiness co checks.agent + log request_id + RBAC 403 log,system,phase6.test.js,tab-all
 SEC-10,Agent khong lam lo cong no cua phong ban khac (debt leak qua agent),debts,sec01-debt-leak.test.js,tab-all
 QA-08,Agent rule-based chat + availability + public chat,agent,chat-rule.test.js|avail01.test.js|public-chat.test.js,tab-cskh
+SEC-11,Doi mat khau chinh user (old_password + policy chu+so>=8 + tang auth_version + revoke all sessions + audit cung tx),users+refresh_tokens+audit_log,auth.test.js|auth-password.test.js,tab-all
+SEC-12,Agent audit fail-closed + ID parity (insertedId + no ORDER BY id fallback + tx audit),tickets+ratings+audit_log,agent-audit-parity.test.js,tab-cskh
+PG-DB-REG,Dialect/data-integrity regression (PG-DB-01/04/06/07/08/09 + TYPE-01 + TEST-ISO-01),system,dialect-regression.test.js,tab-all

@@ -28,6 +28,7 @@ paths:
   /api/auth/refresh: {post: {tags: [auth], summary: "Xoay vong refresh token (atomic). Token cu bi thu hoi => 401 + thu hoi TOAN BO phien (reuse detection)", responses: {'200': {description: rotate + csrf_token moi}, '401': {description: AUTH (het han / reuse)}}}}
   /api/auth/logout: {post: {tags: [auth], summary: "Thu hoi phien hien tai", responses: {'200': {description: revoked}}}}
   /api/auth/logout-all: {post: {tags: [auth], summary: "Thu hoi TOAN BO phien cua user (dung khi doi mat khau)", responses: {'200': {description: revoked_all}}}}
+  /api/auth/change-password: {post: {tags: [auth], summary: "Doi mat khau chinh user (can old_password + policy chu+so>=8); xong tang auth_version + thu hoi TOAN BO session + clear cookie", responses: {'200': {description: changed}, '400': {description: VALIDATION}, '401': {description: AUTH}}}}
   /api/auth/sessions: {get: {tags: [auth], summary: "Danh sach phien dang mo (CHI cua chinh user)", responses: {'200': {description: sessions}}}}
   /api/auth/sessions/{id}: {delete: {tags: [auth], summary: "Thu hoi 1 phien", responses: {'200': {description: revoked}, '404': {description: NOT_FOUND}}}}
   /api/auth/me: {get: {tags: [auth, scope], summary: "User hien tai + permissions + scope (dept_code, depts, all_depts)", responses: {'200': {description: user + permissions + scope}}}}

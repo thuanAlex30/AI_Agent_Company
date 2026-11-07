@@ -248,7 +248,13 @@ test('pgr06: tao/xoa trigger append-only duoc tren ca 2 dialect', async () => {
   );
 
   // Don du lieu test (khong phai data seed) + khoi phuc expense.
-  await db.run('UPDATE expenses SET paid=0 WHERE id=?', [expId]).catch(() => {});
+  // TEST-ISO: phai XOA payment + expense rieng (khong de lai) — neu chi reset
+  // paid=0 ma giu payment amount=8 thi recon4 (I1b expenses.paid = SUM) fail
+  // + I4 missing-audit cung fail do payment insert truc tiep khong qua service.
+  await dropAppendOnlyTrigger('payments');
+  await db.run('DELETE FROM payments WHERE id=?', [pid]).catch(() => {});
+  await db.run('DELETE FROM expenses WHERE id=?', [expId]).catch(() => {});
+  await createAppendOnlyTrigger('payments');
 });
 
 // ---------------------------------------------------------------------------
