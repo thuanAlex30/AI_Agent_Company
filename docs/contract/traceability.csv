@@ -52,3 +52,31 @@ US-STAB-QA-04,Security regression suite chay RIENG trong CI,system,security-regr
 US-STAB-QA-05,Docker build + Compose smoke (service len, readiness 200),system,docker-smoke,tab-all
 US-STAB-DX-01,Version 8.0.0 thong nhat + README kien truc v8,package.json,verify-gate,tab-all
 US-STAB-DX-02,Archive lab/debug artifacts + legacy root app (source tree sach),archive/,verify-gate,tab-all
+SEC-05,Refresh session management (danh sach phien + thu hoi tung phien + logout-all),refresh_tokens,security-regression.test.js,tab-all
+SEC-06,Scope v2 — phong ban server-side fail-closed + resource_dept danh muc,resource_dept,scope-v2.test.js,tab-all
+SEC-07,CSRF guard (double-submit cookie) + X-CSRF-Token cho mutation,system,phase5.test.js,tab-all
+SEC-08,FE refresh queue (1 refresh chay cho nhieu request 401) + retry giu Idempotency-Key,system,phase5.test.js,tab-all
+BUS-01,Cap duyet tinh tu approval-matrix.json (client khong ep cap duoc),approvals,phase4.test.js,tab-legal
+BUS-02,Cap duyet bo sung legal cho contract >= nguong,approvals+contracts,phase4.test.js,tab-legal
+BUS-03,ORDER_FLOW state machine (khong bo qua buoc giao hang khi thanh toan day du),orders,phase4.test.js,tab-sales
+BUS-04,IT_FLOW state machine cho incident,it_incidents,phase4.test.js,tab-it
+BUS-05,QA validate ref_id ton tai theo ref_type,qa_checks,phase4.test.js,tab-qa
+BUS-06,Storefront dat truoc ton kho atomic (khong tao don ma khi het hang),"orders,order_items,stock_moves",phase4.test.js,storefront-gio-checkout
+BUS-07,Import CSV phan biet duplicate vs invalid theo changes,transactions,phase4.test.js,tab-finance
+BUS-08,Do chi ghi theo `changes` + audit cung transaction cho moi mutation,audit_log+business-tables,phase4.test.js,tab-all
+BUS-09,Cam fallback lay ID bang ORDER BY id DESC LIMIT 1 (dung insertedId),"orders,customers,stock_moves,qa_checks,sop_tasks,approvals",phase4.test.js,tab-all
+BUS-10,Row locking truoc khi ghi (order/debt/approval) — chong lost-update,"orders,debts,approvals",phase4.test.js,tab-all
+BUS-11,Tao nhan su + tuyen dung + dao tao co audit trong cung transaction,"employees,recruitments,trainings",hr.test.js,tab-hr
+BUS-12,Tao nha cung cap + san pham + SOP co audit trong cung transaction,"suppliers,products,sop_tasks",p2p.test.js,tab-ops
+BUS-13,Tao phieu QA + chat ticket + danh gia + chi nhanh co audit trong cung transaction,"qa_checks,tickets,ratings",sla.test.js,tab-cskh
+BUS-14,Tao rui ro + san pham feature + IT incident co audit trong cung transaction,"risks,product_features,it_incidents",phase4.test.js,tab-legal
+PG-01,Dialect parity — 2 file migration cung tap bang/cot,system,verify-gate,tab-all
+PG-02,Khong dung ham SQLite-only trong migration (date/strftime/ifnull/group_concat),system,verify-gate,tab-all
+PG-03,created_by la kieu so o ca 2 dialect,system,verify-gate,tab-all
+PG-04,Forward FK trong migration PostgreSQL — khong co,system,verify-gate,tab-all
+PG-05,Contract-sync — 3 ban contract giong het nhau,system,verify-gate,tab-all
+OPS-01,Container chay user khong phai root + cap_drop ALL + read_only + no-new-privileges,system,verify-gate,tab-all
+OPS-02,Log moi dong co request_id + log quyet dinh RBAC/scope 403,system,verify-gate,tab-all
+OPS-03,Readiness kiem tra ca agent (checks.agent) + trang thai degraded,system,avail01.test.js,tab-all
+OPS-04,.env.example day du bien moi truong van hanh,system,verify-gate,tab-all
+QA-06,Verify >= 400 assert + doc source THAT (khong xanh gia),system,verify-gate,tab-all

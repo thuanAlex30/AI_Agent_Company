@@ -247,6 +247,13 @@ async function assertBusinessScope(conn, user, table, id) {
     [table, rid]
   );
   if (!row) {
+    // Phase 6 (OPS-04): log IDOR/denied kem user/role/dept/resource.
+    try {
+      require('./logger').warn('SCOPE 403 — khong xac dinh duoc phong ban cua resource', {
+        user: user && user.username, role: user && user.role,
+        dept: user && user.dept_code, resource: `${table}#${rid}`,
+      });
+    } catch {}
     throw new AppError('FORBIDDEN', `Khong xac dinh duoc phong ban cua ${table}#${rid}`, 403);
   }
   enforceDept(user, row.dept_code, `${table}#${rid}`);

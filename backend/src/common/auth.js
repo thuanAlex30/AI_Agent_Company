@@ -377,6 +377,19 @@ function requirePerm(perm) {
     const matrix = loadRoles().matrix || {};
     const allowed = matrix[perm] || [];
     if (allowed.includes('*') || allowed.includes(role)) return next();
+    // Phase 6 (OPS-04): log MOI quyet dinh RBAC 403 kem user/role/dept/resource
+    // => truy vet duoc IDOR va "sai quyen".
+    try {
+      require('./logger').warn('RBAC 403 — quyen bi tu choi', {
+        user: req.user.username || null,
+        role,
+        dept: (req.user && req.user.dept_code) || null,
+        perm,
+        resource: req.originalUrl || req.url || null,
+        method: req.method,
+        request_id: req.requestId || null,
+      });
+    } catch {}
     return next(new AppError('FORBIDDEN', `Vai ${role} khong co quyen ${perm}`, 403));
   };
 }

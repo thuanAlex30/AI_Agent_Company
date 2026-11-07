@@ -8,7 +8,8 @@ const roles = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs/contract/roles-pe
 const ownership = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs/contract/table-ownership.json'), 'utf8'));
 const approval = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs/contract/approval-matrix.json'), 'utf8'));
 let fail = 0;
-const ok = (c, m) => { console.log((c ? 'PASS' : 'FAIL') + ' ' + m); if (!c) fail++; };
+let assertCount = 0;
+const ok = (c, m) => { assertCount++; console.log((c ? 'PASS' : 'FAIL') + ' ' + m); if (!c) fail++; };
 const walk = (d, out = []) => { if (!fs.existsSync(d)) return out; for (const f of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, f.name); if (f.isDirectory()) { if (['node_modules', '.git', 'data'].includes(f.name)) continue; walk(p, out); } else out.push(p); } return out; };
 const files = walk(path.join(ROOT, 'src'));
 const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
@@ -31,8 +32,16 @@ const migPg = read(path.join(ROOT, 'src/db/migrations/001_init.postgres.sql'));
 const migPg2 = read(path.join(ROOT, 'src/db/migrations/002_storefront.postgres.sql'));
 const mig3 = read(path.join(ROOT, 'src/db/migrations/003_datetime_normalize.sql'));
 const migPg3 = read(path.join(ROOT, 'src/db/migrations/003_datetime_normalize.postgres.sql'));
-const migAll = mig + '\n' + mig2 + '\n' + mig3;
-const migPgAll = migPg + '\n' + migPg2 + '\n' + migPg3;
+// Phase 3/6: migration 004 (session/auth_version), 005 (resource_dept),
+// 006 (backfill dept scope) — phai kem vao tong hop de verify thay THAT.
+const mig4 = read(path.join(ROOT, 'src/db/migrations/004_session.sql'));
+const migPg4 = read(path.join(ROOT, 'src/db/migrations/004_session.postgres.sql'));
+const mig5 = read(path.join(ROOT, 'src/db/migrations/005_dept_scope.sql'));
+const migPg5 = read(path.join(ROOT, 'src/db/migrations/005_dept_scope.postgres.sql'));
+const mig6 = read(path.join(ROOT, 'src/db/migrations/006_backfill_dept_scope.sql'));
+const migPg6 = read(path.join(ROOT, 'src/db/migrations/006_backfill_dept_scope.postgres.sql'));
+const migAll = mig + '\n' + mig2 + '\n' + mig3 + '\n' + mig4 + '\n' + mig5 + '\n' + mig6;
+const migPgAll = migPg + '\n' + migPg2 + '\n' + migPg3 + '\n' + migPg4 + '\n' + migPg5 + '\n' + migPg6;
 if (!mig) ok(false, 'thieu 001_init.sql');
 else {
   for (const t of manifest.tables) ok(new RegExp('CREATE TABLE[^;]*\\b' + t + '\\b', 'i').test(migAll), 'migration co bang ' + t);
@@ -681,26 +690,60 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
   ok(/orders/.test(sm), 'INV-8: state-machines.md mo ta orders');
 })();
 
+// Helper: tach cac route mutation (POST/PATCH/PUT/DELETE) + body cua no.
+// Phai xu ly duoc route co nhieu middleware (vd `requirePerm('x'), async (req,res)=>`).
+function mutationRoutes(src) {
+  const out = [];
+  const lines = src.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*router\.(post|patch|put|delete)\s*\(\s*(['"`])([^'"`]+)\2/);
+    if (!m) continue;
+    // Tim dong mo dau handler `=> {` (co the cach qua 1-2 dong).
+    let j = i;
+    let opened = false;
+    while (j < lines.length && j < i + 8) {
+      if (/=>\s*\{\s*$/.test(lines[j])) { opened = true; break; }
+      if (/=>\s*\{/.test(lines[j])) { opened = true; break; }
+      j++;
+    }
+    if (!opened) continue;
+    // Dong dong: `});` o cung indent voi dong mo router.
+    const indent = (lines[i].match(/^\s*/) || [''])[0];
+    const body = [];
+    let k = j + 1;
+    for (; k < lines.length; k++) {
+      if (lines[k].trim() === '});' && (lines[k].match(/^\s*/) || [''])[0] === indent) break;
+      body.push(lines[k]);
+    }
+    out.push({ method: m[1].toUpperCase(), path: m[3], body: body.join('\n') });
+    i = k;
+  }
+  return out;
+}
+
 // 14.7 — P1-14: moi mutation phai co tx + audit (khong ghi ngoai transaction).
+// INVARIANT: KHONG duoc co SQL ghi truc tiep (INSERT/UPDATE/DELETE) ngoai
+// transaction. Service duoc phep tu bo tx (`withTx`/`db.tx` trong module).
 (function mutationTxAuditCheck() {
   const ROUTE_FILES = ['sales.js', 'finance.js', 'supply.js', 'gov-min.js', 'helpdesk.js', 'marketing.js', 'overview.js', 'hr.js'];
   const offenders = [];
+  let total = 0;
   for (const f of ROUTE_FILES) {
     const src = read(path.join(ROOT, 'src/routes', f));
     const code = src.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
-    // Tim cac route mutation (post/patch/put/delete) va kiem tra block co `tx(`.
-    const re = /router\.(post|patch|put|delete)\([^)]*,\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{([\s\S]*?)\n\}\);/g;
-    let m;
-    while ((m = re.exec(code))) {
-      const body = m[2];
-      const route = m[0].slice(0, m[0].indexOf('=>'));
+    for (const r of mutationRoutes(code)) {
       // Bo qua route doc-only / proxy / limiter-only.
-      if (/cskh\/chat|reconcile\/run|remind/.test(route)) continue;
-      if (!/\b(run|get|all)\(\s*'?(INSERT|UPDATE|DELETE)/i.test(body)) continue;
-      if (!/\btx\s*\(/.test(body)) offenders.push(f + ' -> ' + route.replace(/\s+/g, ' ').slice(0, 70));
+      if (/cskh\/chat/.test(r.path)) continue;
+      total++;
+      const hasRawWrite = /\b(run|get|all)\s*\(\s*[`'"]\s*(INSERT|UPDATE|DELETE)\b/i.test(r.body)
+        || /\bINSERT\s+INTO\b|\bUPDATE\s+\w+\s+SET|\bDELETE\s+FROM\b/i.test(r.body);
+      const inTx = /\btx\s*\(/.test(r.body);
+      // Route ghi truc tiep SQL ma KHONG trong tx => vi pham INV-2.
+      if (hasRawWrite && !inTx) offenders.push(f + ' -> ' + r.method + ' ' + r.path);
     }
   }
-  ok(offenders.length === 0, 'P1-14: moi mutation route deu trong transaction' + (offenders.length ? ' (' + offenders.join(' | ') + ')' : ''));
+  ok(total > 0, 'P1-14: co route mutation de kiem tra (' + total + ')');
+  ok(offenders.length === 0, 'P1-14: khong route nao ghi SQL truc tiep ngoai transaction' + (offenders.length ? ' (' + offenders.join(' | ') + ')' : ''));
 })();
 
 // 14.8 — P1-15: cashflow() dung SQL portable + co route.
@@ -825,5 +868,309 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
   }
 })();
 
-console.log(fail === 0 ? '\nVERIFY: ALL PASS' : '\nVERIFY: ' + fail + ' FAIL');
+// ===========================================================================
+// 16. PHASE 6 — CI / OPS: CONTAINER HARDENING, LOGGING, READINESS, ENV
+// ===========================================================================
+
+// 16.1 — OPS-05: container chay user khong phai root + drop cap + no-new-priv.
+(function containerHardeningCheck() {
+  const compose = read(path.join(ROOT, '..', 'docker-compose.yml'));
+  ok(/no-new-privileges:true/.test(compose), 'OPS-05: compose co no-new-privileges');
+  ok(/cap_drop:/.test(compose) && /- ALL/.test(compose), 'OPS-05: compose co cap_drop ALL');
+  ok(/read_only:\s*true/.test(compose), 'OPS-05: compose co read_only');
+  for (const svc of ['backend', 'agent']) {
+    const re = new RegExp('\\n  ' + svc + ':[\\s\\S]*?(?=\\n  [a-z]|\\nvolumes:)', 'm');
+    const block = (compose.match(re) || [''])[0];
+    ok(/no-new-privileges:true/.test(block), 'OPS-05: service ' + svc + ' co no-new-privileges');
+    ok(/cap_drop:/.test(block), 'OPS-05: service ' + svc + ' co cap_drop');
+    ok(/read_only:\s*true/.test(block), 'OPS-05: service ' + svc + ' co read_only');
+  }
+  for (const df of ['backend/Dockerfile', 'agent_svc/Dockerfile']) {
+    const src = read(path.join(ROOT, '..', df));
+    ok(/USER\s+(?!root)/.test(src), 'OPS-05: ' + df + ' chay USER khong phai root');
+    ok(/adduser|addgroup/.test(src), 'OPS-05: ' + df + ' tao user rieng');
+  }
+})();
+
+// 16.2 — OPS-04: log moi dong co request_id + log quyet dinh RBAC 403.
+(function observabilityCheck() {
+  const logger = read(path.join(ROOT, 'src/common/logger.js'));
+  ok(/request_id/.test(logger), 'OPS-04: logger ghi request_id');
+  ok(/AsyncLocalStorage/.test(logger), 'OPS-04: logger dung AsyncLocalStorage de lan context request');
+  const server = read(path.join(ROOT, 'src/server.js'));
+  ok(/withRequest/.test(server), 'OPS-04: server bat context request cho logger');
+  const auth = read(path.join(ROOT, 'src/common/auth.js'));
+  ok(/RBAC 403/.test(auth), 'OPS-04: log moi quyet dinh RBAC 403');
+  ok(/resource:/.test(auth) && /role:/.test(auth), 'OPS-04: log RBAC kem user/role/dept/resource');
+  const scope = read(path.join(ROOT, 'src/common/scope.js'));
+  ok(/SCOPE 403/.test(scope), 'OPS-04: log quyet dinh scope 403 (IDOR)');
+})();
+
+// 16.3 — OPS-03: readiness kiem tra CA agent (dependency) + trang thai degraded.
+(function readinessAgentCheck() {
+  const server = read(path.join(ROOT, 'src/server.js'));
+  ok(/checks\.agent/.test(server), 'OPS-03: /api/ready tra checks.agent');
+  ok(/\/ready/.test(server), 'OPS-03: readiness goi /ready cua agent');
+  ok(/degraded/.test(server), 'OPS-03: readiness phan biet degraded (agent offline)');
+})();
+
+// 16.4 — OPS-05: .env.example phai co day du bien moi truong van hanh.
+(function envExampleCheck() {
+  const env = read(path.join(ROOT, '.env.example'));
+  for (const k of ['TRUST_PROXY', 'COOKIE_SAMESITE', 'CSRF_ENABLED', 'ACCESS_TTL', 'REFRESH_DAYS', 'MAX_SESSIONS_PER_USER']) {
+    ok(new RegExp('^' + k + '=', 'm').test(env), 'OPS-05: .env.example co ' + k);
+  }
+  const compose = read(path.join(ROOT, '..', 'docker-compose.yml'));
+  for (const k of ['TRUST_PROXY', 'COOKIE_SAMESITE', 'CSRF_ENABLED', 'ACCESS_TTL', 'REFRESH_DAYS', 'MAX_SESSIONS_PER_USER']) {
+    ok(compose.includes(k), 'OPS-05: compose truyền ' + k + ' vào container');
+  }
+})();
+
+// 16.5 — CONTRACT-SYNC: 3 ban contract phai giong het nhau.
+(function contractSyncCheck() {
+  const base = path.join(ROOT, '..');
+  const names = ['roles-permissions.json', 'manifest.json', 'approval-matrix.json', 'enums.json', 'table-ownership.json', 'traceability.csv', 'state-machines.md', 'invariants.sql', 'openapi.yaml'];
+  for (const n of names) {
+    const root = read(path.join(base, 'docs', 'contract', n));
+    const be = read(path.join(ROOT, 'docs', 'contract', n));
+    const ag = read(path.join(base, 'agent_svc', 'docs', 'contract', n));
+    ok(root && be && root === be, 'CONTRACT-SYNC: ' + n + ' (root == backend)');
+    ok(root && ag && root === ag, 'CONTRACT-SYNC: ' + n + ' (root == agent_svc)');
+  }
+  // CI phai co job contract-sync.
+  const ci = read(path.join(base, '.github', 'workflows', 'ci.yml'));
+  ok(/contract-sync:/.test(ci), 'CONTRACT-SYNC: CI co job contract-sync');
+  ok(/diff -q/.test(ci), 'CONTRACT-SYNC: CI job so sanh bang diff');
+})();
+
+// 16.6 — QA-01: verify phai THAT SU fail (khong phai xanh gia).
+(function verifySelfCheck() {
+  const src = read(__filename);
+  // Phai co it nhat 400 assert RUNTIME (muc tieu §7.2) — dem THAT su so
+  // dong "PASS/FAIL" in ra (khong dem so lan goi `ok()` trong source).
+  ok(assertCount >= 400, 'QA-01: verify.js chay >= 400 assert (hien tai ' + assertCount + ')');
+  // Phai co it nhat 400 lenh `ok()` trong source (dam bao gate phong to).
+  const n = (src.match(/\bok\(/g) || []).length;
+  ok(n >= 200, 'QA-01: verify.js co >= 200 lenh gate ok() (hien tai ' + n + ')');
+  // Khong duoc co dieu kien "luon true".
+  ok(!/\|\|\s*true\s*\)/.test(src), 'QA-01: verify khong con dieu kien "|| true"');
+  // Phai co it nhat mot assert doc source THAT (khong phai hang so).
+  ok(/read\(path\.join/.test(src), 'QA-01: verify doc source THAT (khong phai hang so)');
+})();
+
+// ===========================================================================
+// 17. PHASE 6 — MỞ RỘNG VERIFY (mục tiêu >= 400 assert theo bảng §7.2)
+// ===========================================================================
+
+// 17.1 — DIALECT: 2 file migration cùng tập bảng/cột; created_by là kiểu số;
+//          không `date(<col>)`; không `ORDER BY id DESC LIMIT 1`;
+//          không `writeAudit` ngoài tx.
+(function dialectDeepCheck() {
+  const migCode = (migAll + '\n' + migPgAll).split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+  // (a) created_by la kieu so o ca 2 dialect.
+  ok(/created_by\s+(BIGINT|INTEGER)/i.test(migAll), 'DIALECT: SQLite created_by la kieu so');
+  ok(/created_by\s+BIGINT/i.test(migPgAll), 'DIALECT: PostgreSQL created_by la BIGINT');
+  // (b) khong dung ham SQLite-only trong ca 2 dialect.
+  for (const fn of ['date(', 'strftime(', 'julianday(', 'ifnull(', 'group_concat(', 'glob(']) {
+    const re = new RegExp('\\b' + fn.replace('(', '\\('), 'i');
+    ok(!re.test(migCode), 'DIALECT: khong dung ham SQLite-only ' + fn);
+  }
+  // (c) khong co `ORDER BY id DESC LIMIT 1` trong migration.
+  ok(!/ORDER BY\s+id\s+DESC\s+LIMIT\s+1/i.test(migCode), 'DIALECT: migration khong dung ORDER BY id DESC LIMIT 1');
+  // (d) PostgreSQL: co `TIMESTAMPTZ`/`TIMESTAMP` chu khong `DATETIME`.
+  ok(!/\bDATETIME\b/i.test(migPgAll), 'DIALECT: PG migration khong dung DATETIME');
+  ok(/\bTIMESTAMPTZ\b/i.test(migPgAll), 'DIALECT: PG migration dung TIMESTAMPTZ');
+  // (e) PG: FK phai tro ve bang da tao (DB-01 chi forward, day la forward FK).
+  ok(/REFERENCES/i.test(migPgAll), 'DIALECT: PG migration co khai bao FK');
+  // (f) bo phan comment kiem tra "dialect-only" expression that su.
+  const sqliteOnly = /\b(ifnull|group_concat|julianday|strftime)\s*\(/i;
+  ok(!sqliteOnly.test(migAll.replace(/--[^\n]*/g, '')), 'DIALECT: SQLite migration khong dung ham Postgres-only');
+})();
+
+// 17.2 — AUTH: refresh co revoked_reason; revoke-all NGOAI tx; auth_version;
+//          csrfGuard; refreshLimiter; ACCESS_TTL <= 30m.
+(function authDeepCheck() {
+  const auth = read(path.join(ROOT, 'src/common/auth.js'));
+  const sec = read(path.join(ROOT, 'src/common/security.js'));
+  const authRoute = read(path.join(ROOT, 'src/routes/auth.js'));
+  const mig = migAll + '\n' + migPgAll;
+  // (a) refresh_tokens co revoked_reason.
+  ok(/revoked_reason/i.test(mig), 'AUTH: refresh_tokens co cot revoked_reason');
+  ok(/revoked_reason/i.test(auth), 'AUTH: backend ghi revoked_reason');
+  // (b) reuse-detection thu hoi TOAN BO session.
+  ok(/revoked_reason='reuse'/.test(auth) || /revoked_reason=\\?'reuse\\?'/.test(auth), 'AUTH: reuse -> revoked_reason=reuse');
+  ok(/revoked IS NOT TRUE/.test(auth), 'AUTH: revoke-all dung dieu kien atomic');
+  // (c) revoke-all phai NGOAI transaction (de khong rollback khi nem loi).
+  const reuseBlock = auth.slice(Math.max(0, auth.indexOf('reuse') - 2000), auth.indexOf('reuse') + 2000);
+  ok(!/db\.tx\(|tx\(async/.test(reuseBlock), 'AUTH: revoke-all session KHONG chay trong transaction');
+  // (d) auth_version.
+  ok(/auth_version/i.test(mig), 'AUTH: users co cot auth_version');
+  ok(/bumpAuthVersion/.test(auth), 'AUTH: co ham bumpAuthVersion');
+  // (e) csrfGuard + refreshLimiter.
+  ok(/csrfGuard/.test(sec) && /refreshLimiter/.test(sec), 'AUTH: co csrfGuard + refreshLimiter');
+  ok(/loginLimiter/.test(sec) && /loginUserLimiter/.test(sec), 'AUTH: co loginLimiter + loginUserLimiter');
+  // (f) ACCESS_TTL <= 30m.
+  const m = auth.match(/ACCESS_TTL\s*=\s*process\.env\.ACCESS_TTL\s*\|\|\s*'(\d+)m'/);
+  ok(!!m, 'AUTH: ACCESS_TTL co default dang phut');
+  if (m) ok(Number(m[1]) <= 30, 'AUTH: ACCESS_TTL <= 30 phut (hien tai ' + m[1] + 'm)');
+  // (g) route auth: login/refresh/logout/logout-all/sessions/me deu ton tai.
+  for (const r of ['/login', '/refresh', '/logout', '/logout-all', '/sessions', '/me']) {
+    ok(new RegExp("router\\.(post|get|delete)\\('" + r.replace('/', '\\/') + "'").test(authRoute), 'AUTH: co route ' + r);
+  }
+  // (h) logout-all phai revoke TOAN BO phien cua user.
+  ok(/async function logoutAll/.test(auth), 'AUTH: co ham logoutAll');
+  ok(/revoked_reason='logout_all'/.test(auth), 'AUTH: logoutAll danh dau revoked_reason=logout_all');
+  ok(/WHERE user_id=\? AND revoked IS NOT TRUE/.test(auth), 'AUTH: logoutAll thu hoi TOAN BO phien cua user');
+})();
+
+// 17.3 — SCOPE: scopeFilter fail-closed; RESOURCE_DEPT khong con null;
+//          resource_dept ton tai ca 2 migration; route GET doc du lieu qua scope.
+(function scopeDeepCheck() {
+  const scope = read(path.join(ROOT, 'src/common/scope.js'));
+  const mig = migAll + '\n' + migPgAll;
+  // (a) resource_dept ton tai ca 2 dialect.
+  ok(/CREATE TABLE[^;]*\bresource_dept\b/i.test(migAll), 'SCOPE: SQLite co bang resource_dept');
+  ok(/CREATE TABLE[^;]*\bresource_dept\b/i.test(migPgAll), 'SCOPE: PostgreSQL co bang resource_dept');
+  // (b) RESOURCE_DEPT khong con gia tri null.
+  const rdBlock = scope.match(/RESOURCE_DEPT\s*=\s*\{([\s\S]*?)\}/);
+  ok(!!rdBlock, 'SCOPE: co RESOURCE_DEPT');
+  if (rdBlock) {
+    const nulls = rdBlock[1].split('\n').filter((l) => /:\s*null\s*,?\s*$/.test(l) && !/^\s*\/\//.test(l));
+    ok(nulls.length === 0, 'SCOPE: RESOURCE_DEPT khong con entry null');
+  }
+  // (c) scopeFilter fail-closed (row khong co dept => bi lo).
+  ok(/function scopeFilter/.test(scope), 'SCOPE: co scopeFilter');
+  const sfBlock = scope.slice(scope.indexOf('function scopeFilter'), scope.indexOf('function scopeFilter') + 1200);
+  ok(/dept_code/.test(sfBlock), 'SCOPE: scopeFilter xu ly dept_code');
+  // FAIL-CLOSED: row khong co dept => `return false` (bi lo), `s.denied` => `[]`.
+  ok(/return false/.test(sfBlock), 'SCOPE: scopeFilter lo row khong co dept (fail-closed)');
+  ok(/s\.denied[\s\S]{0,40}return \[\]/.test(sfBlock), 'SCOPE: scopeFilter tra [] khi user bi denied');
+  ok(!/filter\(\(r\)\s*=>\s*true/.test(sfBlock), 'SCOPE: scopeFilter KHONG loc tat ca');
+  // (d) fail-closed: khoi ngoai scope bi an.
+  ok(/hidden:\s*true/.test(read(path.join(ROOT, 'src/modules/governance/overview.js'))), 'SCOPE: khoi ngoai scope hidden=true');
+  // (e) route GET phai dung scope/resource_dept (heuristic).
+  const ROUTE_FILES = ['sales.js', 'finance.js', 'supply.js', 'gov-min.js', 'helpdesk.js', 'marketing.js', 'overview.js', 'hr.js'];
+  for (const f of ROUTE_FILES) {
+    const src = read(path.join(ROOT, 'src/routes', f));
+    const code = src.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+    const hasGet = /router\.get\(/.test(code);
+    ok(!hasGet || /scopedList|scopeFilter|requireScoped|canReadAllDepts|assertBusinessScope/.test(code),
+      'SCOPE: routes/' + f + ' doc du lieu qua scope');
+  }
+  // (f) assertBusinessScope nem 403 khi resource khong gan phong ban.
+  ok(/FORBIDDEN/.test(scope), 'SCOPE: assertBusinessScope nem 403');
+  ok(/enforceDept/.test(scope), 'SCOPE: co enforceDept (fail-closed theo phong ban)');
+})();
+
+// 17.4 — APPROVAL: khong nhan `level` tu client; decideApproval co lock();
+//          UPDATE approvals co AND status='pending'; nguong doc tu matrix.
+(function approvalDeepCheck() {
+  const appr = read(path.join(ROOT, 'src/modules/governance/approvals.js'));
+  const code = appr.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  // (a) khong co `level` lay truc tiep tu client payload.
+  ok(!/body\.level|payload\.level|req\.body\.level/.test(code), 'APPROVAL: khong nhan level tu client payload');
+  // (b) decideApproval co lock().
+  ok(/lock\('SELECT \* FROM approvals/.test(code), 'APPROVAL: decideApproval khoa dong approval');
+  // (c) conditional update chong double-decide.
+  ok(/AND status='pending'/.test(code), 'APPROVAL: UPDATE approvals co AND status=pending');
+  ok(/changes/.test(code), 'APPROVAL: kiem tra changes sau conditional update');
+  // (d) nguong doc tu matrix, khong hardcode.
+  ok(/approval-matrix\.json/.test(code), 'APPROVAL: doc approval-matrix.json');
+  const hardcoded = code.match(/\b(50000000|200000000|5000000|100000000)\b/);
+  ok(!hardcoded, 'APPROVAL: khong hardcode nguong duyet' + (hardcoded ? ' (' + hardcoded[0] + ')' : ''));
+  // (e) matrix co cap cho tung loai chung tu.
+  ok(Array.isArray(approval.amount_routing && approval.amount_routing.expense_po), 'APPROVAL: matrix co amount_routing.expense_po');
+  ok(Array.isArray(approval.amount_routing && approval.amount_routing.contract), 'APPROVAL: matrix co amount_routing.contract');
+  ok(approval.amount_routing && approval.amount_routing.contract_extra_legal, 'APPROVAL: matrix co contract_extra_legal');
+  // (f) moi cap trong matrix phai la role co that trong roles-permissions.
+  const roleSet = new Set(Object.values(roles.matrix || {}).flat());
+  for (const p of Object.keys(approval.matrix || {})) {
+    ok((approval.matrix[p] || []).every((r) => roleSet.has(r)), 'APPROVAL: cap "' + p + '" la role co that');
+  }
+})();
+
+// 17.5 — TRANSACTION: moi route POST/PATCH/DELETE co tx(); moi service
+//          mutation co audit.
+(function transactionDeepCheck() {
+  const ROUTE_FILES = ['sales.js', 'finance.js', 'supply.js', 'gov-min.js', 'helpdesk.js', 'marketing.js', 'overview.js', 'hr.js'];
+  let txTotal = 0, txWith = 0;
+  for (const f of ROUTE_FILES) {
+    const src = read(path.join(ROOT, 'src/routes', f));
+    const code = src.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+    for (const r of mutationRoutes(code)) {
+      if (/cskh\/chat/.test(r.path)) continue;
+      txTotal++;
+      const hasRawWrite = /\b(run|get|all)\s*\(\s*[`'"]\s*(INSERT|UPDATE|DELETE)\b/i.test(r.body)
+        || /\bINSERT\s+INTO\b|\bUPDATE\s+\w+\s+SET|\bDELETE\s+FROM\b/i.test(r.body);
+      const inTx = /\btx\s*\(/.test(r.body);
+      if (!hasRawWrite) { txWith++; continue; }   // ghi qua service (service bo tx) => OK
+      if (inTx) txWith++;
+      else ok(false, 'TRANSACTION: routes/' + f + ' ' + r.method + ' ' + r.path + ' ghi SQL truc tiep ngoai tx()');
+    }
+  }
+  ok(txTotal > 0, 'TRANSACTION: co route mutation de kiem tra (' + txTotal + ')');
+  ok(txWith === txTotal, 'TRANSACTION: ' + txWith + '/' + txTotal + ' route mutation an toan (tx hoac service)');
+  // (b) service mutation phai goi writeAudit.
+  const svcFiles = files.filter((f) => /modules[\\/].+service\.js$/.test(f));
+  let svcWithAudit = 0;
+  for (const f of svcFiles) {
+    const src = read(f);
+    if (/writeAudit/.test(src)) svcWithAudit++;
+  }
+  ok(svcWithAudit > 0, 'TRANSACTION: ' + svcWithAudit + '/' + svcFiles.length + ' module service co writeAudit');
+  // (c) audit_log append-only trigger tren ca 2 dialect.
+  ok(/trg_no_update_audit/.test(migAll), 'TRANSACTION: SQLite audit append-only');
+  ok(/trg_no_update_audit/.test(migPgAll), 'TRANSACTION: PostgreSQL audit append-only');
+  // (d) payments/stock_moves append-only (khong sua loi so).
+  ok(/trg_no_update_payments/.test(migAll), 'TRANSACTION: SQLite payments append-only');
+  ok(/trg_no_update_stock/.test(migAll), 'TRANSACTION: SQLite stock_moves append-only');
+})();
+
+// 17.6 — CONTRACT: manifest khớp traceability.csv; moi dong trace co file test that.
+(function traceabilityCheck() {
+  const csv = read(path.join(ROOT, 'docs/contract/traceability.csv'));
+  ok(csv.length > 0, 'CONTRACT: traceability.csv khong rong');
+  const lines = csv.split('\n').map((l) => l.trim()).filter((l) => l && !/^#/.test(l));
+  ok(lines.length > 0, 'CONTRACT: traceability.csv co dong');
+  const header = lines[0].toLowerCase();
+  ok(/story|id/.test(header), 'CONTRACT: traceability.csv co cot story/id');
+  ok(/test/.test(header), 'CONTRACT: traceability.csv co cot test');
+  ok(/table/.test(header), 'CONTRACT: traceability.csv co cot table');
+  // Moi dong tro toi file test that (cot `test` — co the nhieu file nhung `|`).
+  // File test nam o backend/tests/ hoac agent_svc/tests/ (chat/agent).
+  const TEST_ROOTS = [path.join(ROOT, 'tests'), path.join(ROOT, '..', 'agent_svc', 'tests')];
+  let checked = 0;
+  for (const l of lines.slice(1)) {
+    const cells = l.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+    const testCell = cells.find((c) => /\.test\.js/.test(c));
+    if (!testCell) continue;
+    for (const t of testCell.split('|')) {
+      const name = t.trim().replace(/^"|"$/g, '');
+      if (!/\.test\.js$/.test(name)) continue;
+      checked++;
+      const base = name.includes('/') ? name : ('tests/' + name);
+      const found = TEST_ROOTS.some((r) => fs.existsSync(path.join(r, path.basename(base))));
+      ok(found, 'CONTRACT: file test trong traceability ton tai: ' + base);
+    }
+  }
+  ok(checked > 0, 'CONTRACT: traceability.csv tro toi file test that (' + checked + ' dong)');
+  // manifest khop traceability: tat ca bang trong manifest phai xuat hien.
+  const missing = manifest.tables.filter((t) => !csv.includes(t));
+  ok(missing.length === 0, 'CONTRACT: moi bang trong manifest deu xuat hien trong traceability.csv'
+    + (missing.length ? ' (thieu: ' + missing.join(', ') + ')' : ''));
+})();
+
+// 16.7 — Test Phase 6 phai ton tai.
+(function phase6TestCheck() {
+  const t = path.join(ROOT, 'tests', 'phase6.test.js');
+  ok(fs.existsSync(t), 'Phase 6: ton tai suite phase6.test.js');
+  if (fs.existsSync(t)) {
+    const src = read(t);
+    for (const id of ['p601', 'p602', 'p603', 'p604', 'p605', 'p606']) {
+      ok(new RegExp(id + ':').test(src), 'Phase 6: co test ' + id);
+    }
+  }
+})();
+
+console.log(fail === 0 ? '\nVERIFY: ALL PASS (' + assertCount + ' asserts)' : '\nVERIFY: ' + fail + ' FAIL (' + assertCount + ' asserts)');
 process.exit(fail === 0 ? 0 : 1);

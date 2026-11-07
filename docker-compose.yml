@@ -39,6 +39,11 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
+    # Phase 6 (OPS-05): harden container — drop moi quyen, khong escalate.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   backend:
     build: ./backend
@@ -62,6 +67,14 @@ services:
       - AGENT_INTERNAL_KEY_OLD=${AGENT_INTERNAL_KEY_OLD:-}
       - AGENT_PUBLIC_KEY_OLD=${AGENT_PUBLIC_KEY_OLD:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:?dat WEBHOOK_SECRET trong .env truoc khi up}
+      # Phase 6 (OPS-05): bien moi truong van hanh.
+      - TRUST_PROXY=${TRUST_PROXY:-loopback}
+      - COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
+      - CSRF_ENABLED=${CSRF_ENABLED:-1}
+      - ACCESS_TTL=${ACCESS_TTL:-30m}
+      - REFRESH_DAYS=${REFRESH_DAYS:-7}
+      - MAX_SESSIONS_PER_USER=${MAX_SESSIONS_PER_USER:-5}
+      - APP_VERSION=${APP_VERSION:-11.1.0}
     volumes:
       - ./logs:/app/logs
     depends_on:
@@ -77,6 +90,15 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+    # Phase 6 (OPS-05): harden container — drop moi quyen Linux, khong
+    # escalate, va filesystem read-only (app khong ghi file nao ngoài ./logs).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
 
   agent:
     build: ./agent_svc
@@ -104,6 +126,14 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+    # Phase 6 (OPS-05): harden container giong backend.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
 
   # ERP noi bo (khong public ra internet — chi bind localhost)
   frontend:

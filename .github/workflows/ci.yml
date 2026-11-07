@@ -402,3 +402,34 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  # ---------------------------------------------------------------------
+  # Phase 6 (OPS-06): CONTRACT-SYNC — 2 ban contract (root / backend /
+  # agent_svc) phai GIONG HET nhau. Khong dong bo => UI/agent/backend
+  # hieu sai quyen hoac sai mo ta API.
+  # ---------------------------------------------------------------------
+  contract-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: So sanh 3 ban contract
+        run: |
+          set -e
+          for f in roles-permissions.json manifest.json approval-matrix.json enums.json table-ownership.json traceability.csv state-machines.md invariants.sql openapi.yaml; do
+            a="docs/contract/$f"
+            b="backend/docs/contract/$f"
+            c="agent_svc/docs/contract/$f"
+            if [ -f "$a" ] && [ -f "$b" ]; then
+              diff -q "$a" "$b" || { echo "LECH: $a vs $b"; exit 1; }
+            fi
+            if [ -f "$a" ] && [ -f "$c" ]; then
+              diff -q "$a" "$c" || { echo "LECH: $a vs $c"; exit 1; }
+            fi
+            echo "OK: $f"
+          done
+      - name: Verify contract gates (mac dinh)
+        working-directory: backend
+        run: node scripts/verify.js
+

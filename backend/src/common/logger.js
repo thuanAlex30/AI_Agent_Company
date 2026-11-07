@@ -8,9 +8,38 @@ const LOG_DIR = path.join(__dirname, '..', '..', 'logs');
 function ensureDir() {
   try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
 }
+
+/**
+ * Phase 6 (OPS-04): moi dong log co `request_id` de truy vet 1 request
+ * xuyen suott (frontend -> nginx -> backend -> agent).
+ * `req.requestId` duoc gan boi `applySecurity` (src/common/security.js).
+ * Log goi trong request nen dung `AsyncLocalStorage` de khong phai truyen
+ * requestId moi noi.
+ */
+const { AsyncLocalStorage } = require('async_hooks');
+const als = new AsyncLocalStorage();
+
+/** Bat context request (goi trong middleware). */
+function withRequest(req, fn) {
+  return als.run(req && req.requestId ? req.requestId : null, fn);
+}
+
+/** request_id hien tai (null neu ngoai request context). */
+function currentRequestId() {
+  const v = als.getStore();
+  return v || null;
+}
+
 function line(level, msg, meta) {
   const ts = new Date().toISOString();
-  return `[${ts}] [${level}] ${msg}` + (meta ? ' ' + JSON.stringify(meta) : '');
+  const rid = (meta && meta.request_id) || currentRequestId();
+  // Phase 6: request_id LUON present (null neu ngoai context) => de doc theo
+  // 1 request ma khong can tien xu ly log.
+  const ridPart = `[rid=${rid || '-'}]`;
+  const m = (meta && meta.request_id !== undefined)
+    ? Object.assign({}, meta, { request_id: rid || null })
+    : Object.assign({ request_id: rid || null }, meta || {});
+  return `[${ts}] [${level}] ${ridPart} ${msg}` + (Object.keys(m).length ? ' ' + JSON.stringify(m) : '');
 }
 function append(lineStr) {
   ensureDir();
@@ -21,4 +50,4 @@ function info(msg, meta) { const l = line('INFO', msg, meta); console.log(l); ap
 function warn(msg, meta) { const l = line('WARN', msg, meta); console.warn(l); append(l); }
 function error(msg, meta) { const l = line('ERROR', msg, meta); console.error(l); append(l); }
 
-module.exports = { info, warn, error };
+module.exports = { info, warn, error, withRequest, currentRequestId, als };

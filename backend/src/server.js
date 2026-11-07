@@ -25,6 +25,12 @@ app.use('/api/public/payments/webhook', express.raw({ type: '*/*', limit: '100kb
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 applySecurity(app);
+// Phase 6 (OPS-04): gan context `request_id` cho moi request => moi dong log
+// deu co `[rid=...]` de truy vet xuyen suott.
+app.use((req, res, next) => {
+  const logger = require('./common/logger');
+  logger.withRequest(req, () => next());
+});
 // Backend API-only (Frontend React chay rieng port 5173, proxy qua CORS + cookie).
 // ERP noi bo dung apiLimiter (300/15p/IP). apiLimiter BO QUA /api/public.
 // Storefront public co limiter rieng trong `public/limiters.js` (bucket rieng,
@@ -53,10 +59,23 @@ app.get('/api/ready', async (req, res) => {
     checks.db = false;
     checks.dbError = e.message;
   }
+  // Phase 6 (OPS-04): kiem tra CA dependency (agent_svc). Agent offline =>
+  // chat/CSKH khong hoat dong => readiness phai bao "degraded" (van 200
+  // de khong restart loop backend, nhung bao ro).
+  const agentUrl = (process.env.AGENT_URL || 'http://localhost:3100').replace(/\/$/, '');
+  try {
+    const ac = await fetch(agentUrl + '/ready', { signal: AbortSignal.timeout(1500) });
+    checks.agent = ac.ok;
+  } catch (e) {
+    checks.agent = false;
+    checks.agentError = String(e.message || e).slice(0, 120);
+  }
+  // DB la dependency BAT BUOC — backend khong the chay khong co DB.
+  // Agent la dependency "soft" (degraded) — van ready de khong restart loop.
   const ready = checks.db;
   return res.status(ready ? 200 : 503).json({
     ok: ready,
-    status: ready ? 'ready' : 'not_ready',
+    status: ready ? (checks.agent ? 'ready' : 'degraded') : 'not_ready',
     service: 'backend',
     version: APP_VERSION,
     checks,
