@@ -55,7 +55,7 @@ router.post('/transactions/import-csv', requirePerm('payments.write'), uploadCsv
     // `duplicate` (trung bank_ref) vs `invalid` (du lieu sai) — 2 nhom rieng.
     const out = await tx(async (c) => {
       const { writeAudit } = require('../common/audit');
-      let imported = 0, duplicate = 0, invalid = 0;
+      let imported = 0, duplicate = 0, invalid = 0, lastId = null;
       for (const r of records.slice(0, 1000)) {
         const bank_ref = String(r.bank_ref || r.ref || '').trim();
         const amount = Number(String(r.amount || '').replace(/[^\d-]/g, ''));
@@ -69,6 +69,7 @@ router.post('/transactions/import-csv', requirePerm('payments.write'), uploadCsv
         if (Number(res2?.changes || 0) === 1) {
           imported++;
           const id = insertedId(res2, 'transactions');
+          lastId = id;
           await setBusinessScope(c, 'transactions', id, 'finance');
           await writeAudit(c, req.user.username, 'create', 'transactions', id, null, { bank_ref, amount, trans_date, source: 'import-csv' });
         } else {
@@ -76,7 +77,11 @@ router.post('/transactions/import-csv', requirePerm('payments.write'), uploadCsv
         }
       }
       const skipped = duplicate + invalid;
-      await writeAudit(c, req.user.username, 'create', 'transactions_import', null, null, { imported, duplicate, invalid, total: records.length });
+      // Audit tong hop lo (audit_log.record_id NOT NULL) — gan vao ban ghi
+      // transaction vua import cuoi cung trong lo.
+      if (lastId) {
+        await writeAudit(c, req.user.username, 'update', 'transactions', lastId, null, { action: 'import-csv-summary', imported, duplicate, invalid, total: records.length });
+      }
       return { imported, skipped, duplicate, invalid, total: records.length };
     });
     return ok(res, out);

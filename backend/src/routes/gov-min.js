@@ -31,15 +31,16 @@ router.post('/approvals', requirePerm('approvals.request'), async (req, res) => 
     if (tbl) await assertBusinessScope(null, req.user, tbl, refId);
     // P1-6: KHONG truyen `level` tu client — cap duyet LUON tinh tu
     // approval-matrix.json trong gov.requestApproval.
-    const out = await gov.requestApproval(null, {
-      ref_type: refType, ref_id: refId,
-      requester: req.user.id, requester_username: req.user.username,
-      note: req.body.note || null,
-    });
-    // Phase 3: gan phong ban cho approval (theo chung tu).
-    const { tx: dbtx } = require('../common/db');
-    await dbtx(async (c) => {
-      await setBusinessScope(c, 'approvals', out.id, req.user.dept_code || 'ceo');
+    // P1-14: approval + resource_dept + audit trong CUNG transaction (INV-2).
+    const out = await tx(async (c) => {
+      const ap = await gov.requestApproval(c, {
+        ref_type: refType, ref_id: refId,
+        requester: req.user.id, requester_username: req.user.username,
+        note: req.body.note || null,
+      });
+      // Phase 3: gan phong ban cho approval (theo chung tu).
+      await setBusinessScope(c, 'approvals', ap.id, req.user.dept_code || 'ceo');
+      return ap;
     });
     return ok(res, out);
   } catch (e) { return fail(res, e); }

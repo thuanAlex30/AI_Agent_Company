@@ -198,7 +198,10 @@ async function propagateApproval(c, ap, decision, actor) {
     return;
   }
   if (ap.ref_type === 'contract') {
-       const ct = await c.get('SELECT * FROM contracts WHERE id=?', [ap.ref_id]);
+    // P1-9: khoa dong hop dong truoc khi cap nhat trang thai.
+    const ct = typeof c.lock === 'function'
+      ? (await c.lock('SELECT * FROM contracts WHERE id=?', [ap.ref_id]))
+      : await c.get('SELECT * FROM contracts WHERE id=?', [ap.ref_id]);
     if (!ct) return;
     const rows = await c.query("SELECT * FROM approvals WHERE ref_type='contract' AND ref_id=? AND status='approved'", [ap.ref_id]);
     const levels = rows.map((r) => r.level);
@@ -222,7 +225,9 @@ async function propagateApproval(c, ap, decision, actor) {
     }
      }
   if (ap.ref_type === 'purchase_order') {
-    const po = await c.get('SELECT * FROM purchase_orders WHERE id=?', [ap.ref_id]);
+    const po = typeof c.lock === 'function'
+      ? (await c.lock('SELECT * FROM purchase_orders WHERE id=?', [ap.ref_id]))
+      : await c.get('SELECT * FROM purchase_orders WHERE id=?', [ap.ref_id]);
     if (po && (po.status === 'draft' || po.status === 'pending_approval')) {
       await c.run("UPDATE purchase_orders SET status='approved' WHERE id=?", [ap.ref_id]);
       await writeAudit(c, actor, 'update', 'purchase_orders', ap.ref_id, { status: po.status }, { status: 'approved' });

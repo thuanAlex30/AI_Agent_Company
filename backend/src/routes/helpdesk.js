@@ -70,7 +70,9 @@ router.patch('/cskh/tickets/:id', requirePerm('tickets.write'), async (req, res)
   try {
     // Phase 3 (P0-4): IDOR — doi URL id ticket cua phong ban khac.
     await assertBusinessScope(null, req.user, 'tickets', req.params.id);
-    return ok(res, await hd.setTicket(null, req.params.id, { status: req.body.status, assignee: req.body.assignee ?? null }, req.user.username));
+    // P1-14: mutation trong tx (audit cung tx — INV-2).
+    const out = await tx((conn) => hd.setTicket(conn, req.params.id, { status: req.body.status, assignee: req.body.assignee ?? null }, req.user.username));
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 router.get('/cskh/sla', requireScoped('orders.read'), async (req, res) => {

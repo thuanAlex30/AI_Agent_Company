@@ -1,7 +1,7 @@
 const express = require('express');
 const { authenticate, requirePerm, filterEmployeeRow } = require('../common/auth');
 const { ok, fail, AppError } = require('../common/errors');
-const { get, all, run, tx } = require('../common/db');
+const { get, all, run, tx, insertedId } = require('../common/db');
 const { scopeFilter, enforceDept, assertResourceScope, canReadAllDepts, requireScoped } = require('../common/scope');
 const hr = require('../modules/hr/service');
 
@@ -35,11 +35,9 @@ router.post('/employees', requirePerm('employees.write'), async (req, res) => {
     const { writeAudit } = require('../common/audit');
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO employees(code,name,dept_code,title,status) VALUES(?,?,?,?,?)', [code, name, dept, title, 'active']);
-      const row = r.lastInsertRowid
-        ? { id: r.lastInsertRowid }
-        : (await c.get('SELECT id FROM employees WHERE code=?', [code]));
-      await writeAudit(c, req.user.username, 'create', 'employees', row?.id, null, { code });
-      return { id: row?.id, code };
+      const id = insertedId(r, 'employees');
+      await writeAudit(c, req.user.username, 'create', 'employees', id, null, { code });
+      return { id, code };
     });
     return ok(res, out);
   } catch (e) { return fail(res, e); }
@@ -48,13 +46,17 @@ router.post('/employees', requirePerm('employees.write'), async (req, res) => {
 router.post('/attendance/checkin', requirePerm('attendance.checkin'), async (req, res) => {
   try {
     const { reqStr } = require('../common/validate');
-    return ok(res, await hr.checkin(null, req.user, reqStr(req.body, 'employee_code')));
+    // P1-14: checkin phai trong transaction (audit cung tx) — INV-2.
+    const out = await tx((conn) => hr.checkin(conn, req.user, reqStr(req.body, 'employee_code')));
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 router.post('/attendance/checkout', requirePerm('attendance.checkin'), async (req, res) => {
   try {
     const { reqStr } = require('../common/validate');
-    return ok(res, await hr.checkout(null, req.user, reqStr(req.body, 'employee_code')));
+    // P1-14: checkout phai trong transaction (audit cung tx) — INV-2.
+    const out = await tx((conn) => hr.checkout(conn, req.user, reqStr(req.body, 'employee_code')));
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 // Phase 3: /hr/today va /hr/payroll-preview loc theo scope (HR scope_read='all'
@@ -107,7 +109,7 @@ router.post('/recruitments', requirePerm('employees.write'), async (req, res) =>
         'INSERT INTO recruitments(position,dept_code,qty,status,opened_date,cost) VALUES(?,?,?,?,?,?)',
         [position, dept, qty, 'open', opened, cost]
       );
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM recruitments WHERE position=? AND dept_code=? ORDER BY id DESC LIMIT 1', [position, dept]))?.id;
+      const id = insertedId(r, 'recruitments');
       await writeAudit(c, req.user.username, 'create', 'recruitments', id, null, { position, dept, qty, cost });
       return { id, position, dept, qty, cost };
     });
@@ -126,7 +128,7 @@ router.post('/trainings', requirePerm('employees.write'), async (req, res) => {
     const { writeAudit } = require('../common/audit');
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO trainings(employee_id,topic,hours,status) VALUES(?,?,?,?)', [employee_id, topic, hours, 'planned']);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM trainings ORDER BY id DESC LIMIT 1'))?.id;
+      const id = insertedId(r, 'trainings');
       await writeAudit(c, req.user.username, 'create', 'trainings', id, null, { employee_id, topic });
       return { id };
     });

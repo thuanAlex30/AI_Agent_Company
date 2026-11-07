@@ -3,7 +3,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { get, run, all, tx, nowISO, toSqlDateTime, isExpired } = require('./db');
+const { get, run, all, tx, nowISO, toSqlDateTime, isExpired, insertedId } = require('./db');
 const { AppError } = require('./errors');
 const logger = require('./logger');
 
@@ -247,7 +247,9 @@ async function refresh(refreshToken, req = null) {
         ua || row.user_agent, ip || row.ip, row.device_label, row.id, nowISO(),
       ]
     );
-    const newId = r.lastInsertRowid || row.id;
+    // P1-8: ID ban ghi vua tao (KHONG fallback ve id token cu — se ghi
+    // audit sai vao ban ghi khac).
+    const newId = insertedId(r, 'refresh_tokens');
     // INV-2: audit TRONG cung transaction voi du lieu.
     await c.run(
       'INSERT INTO audit_log(actor,action,table_name,record_id,old_json,new_json) VALUES(?,?,?,?,?,?)',

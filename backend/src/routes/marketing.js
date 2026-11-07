@@ -1,7 +1,7 @@
 const express = require('express');
 const { authenticate, requirePerm } = require('../common/auth');
 const { ok, fail } = require('../common/errors');
-const { all, tx } = require('../common/db');
+const { all, tx, insertedId } = require('../common/db');
 const { requireScoped, scopedList, setBusinessScope } = require('../common/scope');
 const mkt = require('../modules/marketing/service');
 
@@ -23,7 +23,7 @@ router.post('/campaigns', requirePerm('campaigns.write'), async (req, res) => {
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO campaigns(name,channel,cost,start_date,end_date) VALUES(?,?,?,?,?)',
         [req.body.name, req.body.channel, req.body.cost || 0, req.body.start_date || null, req.body.end_date || null]);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM campaigns ORDER BY id DESC LIMIT 1'))?.id;
+      const id = insertedId(r, 'campaigns');
       await setBusinessScope(c, 'campaigns', id, 'marketing');
       await writeAudit(c, req.user.username, 'create', 'campaigns', id, null, { name: req.body.name, channel: req.body.channel });
       return { id };

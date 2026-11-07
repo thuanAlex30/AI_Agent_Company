@@ -75,7 +75,9 @@ router.patch('/it-incidents/:id', requirePerm('it.write'), async (req, res) => {
   try {
     const { assertBusinessScope } = require('../common/scope');
     await assertBusinessScope(null, req.user, 'it_incidents', req.params.id);
-    return ok(res, await itService.setStatus(null, req.params.id, { status: req.body.status, mttr_min: req.body.mttr_min ?? null }, req.user.username));
+    // P1-14: mutation phai trong transaction (audit cung tx).
+    const out = await tx((conn) => itService.setStatus(conn, req.params.id, { status: req.body.status, mttr_min: req.body.mttr_min ?? null }, req.user.username));
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 router.get('/it/health', requireScoped('orders.read'), async (req, res) => {

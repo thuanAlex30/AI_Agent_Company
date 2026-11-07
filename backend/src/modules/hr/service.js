@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
-const { todayVN } = require('../../common/db');
+const { todayVN, insertedId } = require('../../common/db');
 const { filterEmployeeRow } = require('../../common/auth');
 
 // hr so huu: attendance/employees/recruitments/trainings. CAM write users/refresh_tokens.
@@ -37,7 +37,7 @@ async function checkin(conn, reqUser, employeeCode) {
     return { id: ex.id, work_date: date, status: late ? 'late' : 'present' };
   }
   const r = await c.run('INSERT INTO attendance(employee_id,work_date,check_in,status) VALUES(?,?,?,?) ON CONFLICT(employee_id,work_date) DO NOTHING', [emp.id, date, t, late ? 'late' : 'present']);
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM attendance WHERE employee_id=? AND work_date=?', [emp.id, date]))?.id;
+  const id = insertedId(r, 'attendance');
   await writeAudit(c, reqUser.username, 'create', 'attendance', id, null, { employee_code: employeeCode, work_date: date });
   return { id, work_date: date, status: late ? 'late' : 'present' };
 }

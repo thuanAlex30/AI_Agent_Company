@@ -1,7 +1,7 @@
 const express = require('express');
 const { authenticate, requirePerm, actorId } = require('../common/auth');
 const { ok, fail, AppError } = require('../common/errors');
-const { get, all, run, tx } = require('../common/db');
+const { get, all, run, tx, insertedId } = require('../common/db');
 const { reqStr, reqIntPos, reqCode } = require('../common/validate');
 const {
   requireScoped, scopedList, assertBusinessScope, enforceDept,
@@ -25,31 +25,42 @@ router.post('/products', requirePerm('products.write'), async (req, res) => {
     const name = reqStr(req.body, 'name', { max: 200 });
     const price = reqIntPos(req.body, 'price');
     const cost = reqIntPos(req.body, 'cost');
-    await run('INSERT INTO products(sku,name,price,cost) VALUES(?,?,?,?)', [sku, name, price, cost]);
-    return ok(res, { sku });
+    // P1-14: tx + audit (INV-2: audit phai cung tx voi du lieu nghiep vu).
+    const out = await tx(async (c) => {
+      const r = await c.run('INSERT INTO products(sku,name,price,cost) VALUES(?,?,?,?)', [sku, name, price, cost]);
+      const id = insertedId(r, 'products');
+      const { writeAudit } = require('../common/audit');
+      await writeAudit(c, req.user.username, 'create', 'products', id, null, { sku, name, price, cost });
+      return { id, sku };
+    });
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 
 router.post('/stock/in', requirePerm('stock.write'), async (req, res) => {
   try {
-    return ok(res, await supplyService.moveStock(null, {
+    // P1-14: mutation trong tx (audit cung tx — INV-2).
+    const out = await tx((conn) => supplyService.moveStock(conn, {
       sku: reqCode(req.body, 'sku'), type: 'in', qty: reqIntPos(req.body, 'qty'),
       ref_code: req.body.ref_code || null,
       // Phase 1 (P0-1): created_by = ID (so) cho cot BIGINT; actor = username cho audit.
       created_by: actorId(req.user), actor: req.user.username,
       idempotency_key: req.headers['idempotency-key'] || null,
     }));
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 router.post('/stock/out', requirePerm('stock.write'), async (req, res) => {
   try {
     const qty = reqIntPos(req.body, 'qty');
-    return ok(res, await supplyService.moveStock(null, {
+    // P1-14: mutation trong tx (audit cung tx — INV-2).
+    const out = await tx((conn) => supplyService.moveStock(conn, {
       sku: reqCode(req.body, 'sku'), type: 'out', qty: -qty,
       ref_code: req.body.ref_code || null,
       created_by: actorId(req.user), actor: req.user.username,
       idempotency_key: req.headers['idempotency-key'] || null,
     }));
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 
@@ -89,7 +100,7 @@ router.post('/suppliers', requirePerm('po.write'), async (req, res) => {
     // CUNG transaction (GOV-01).
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO suppliers(code,name,phone) VALUES(?,?,?)', [code, name, req.body.phone || null]);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM suppliers WHERE code=?', [code]))?.id;
+      const id = insertedId(r, 'suppliers');
       await setBusinessScope(c, 'suppliers', id, 'supply');
       await writeAudit(c, req.user.username, 'create', 'suppliers', id, null, { code, name });
       return { id, code };
@@ -164,7 +175,7 @@ router.post('/qa-checks', requireScoped('qa.write'), async (req, res) => {
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO qa_checks(ref_type,ref_id,result,defect,checker) VALUES(?,?,?,?,?)',
         [refType, refId, reqStr(req.body, 'result', { enum: ['pass', 'fail'] }), req.body.defect || null, req.user.username]);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM qa_checks ORDER BY id DESC LIMIT 1'))?.id;
+      const id = insertedId(r, 'qa_checks');
       await setBusinessScope(c, 'qa_checks', id, 'qa');
       await writeAudit(c, req.user.username, 'create', 'qa_checks', id, null, { ref_type: refType, ref_id: refId });
       return { id };
@@ -190,7 +201,7 @@ router.post('/sop-tasks', requireScoped('sop.write'), async (req, res) => {
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO sop_tasks(dept_code,title,owner,due_date,status) VALUES(?,?,?,?,\'todo\')',
         [dept, reqStr(req.body, 'title', { max: 300 }), req.body.owner || null, req.body.due_date || null]);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM sop_tasks ORDER BY id DESC LIMIT 1'))?.id;
+      const id = insertedId(r, 'sop_tasks');
       await writeAudit(c, req.user.username, 'create', 'sop_tasks', id, null, { dept, title: req.body.title });
       return { id };
     });

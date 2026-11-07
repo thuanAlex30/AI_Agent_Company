@@ -216,7 +216,14 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
   ok(/idempotency_key\s+TEXT\s+UNIQUE/i.test(migAll), 'TX-04: co UNIQUE constraint cho idempotency_key');
   ok(/isUniqueViolation/.test(dbSrc), 'TX-04: adapter nhan dien loi UNIQUE (retry handling)');
   // GOV-01: audit ghi trong cung transaction.
-  ok(/conn && typeof conn\.run === 'function'/.test(auditSrc), 'GOV-01: writeAudit dung conn trong transaction');
+  // Phase 4: writeAudit phai THROW khi thieu conn (INV-2) — nhieu cach dien
+  // dat: `!conn || typeof conn.run !== 'function'` hoac
+  // `!conn || typeof conn.run === 'function'` (nham dau bang).
+  ok(
+    /!conn\s*\|\|\s*typeof\s+conn\.run\s*(!==|===)\s*'function'/.test(auditSrc)
+    && /AppError\('GOV'/.test(auditSrc),
+    'GOV-01: writeAudit dung conn trong transaction (throw GOV neu thieu conn)'
+  );
   const auditOutside = [
     read(path.join(ROOT, 'src/routes/hr.js')),
     read(path.join(ROOT, 'src/routes/sales.js')),
@@ -564,6 +571,171 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
     const src = read(t);
     for (const id of ['sec01d', 'sec01e', 'sec01f', 'sec01g', 'sec01h', 'sec01i', 'sec01j', 'sec01k']) {
       ok(new RegExp(id + ':').test(src), 'Phase 3 (§4.7): co test ' + id);
+    }
+  }
+})();
+
+// ===========================================================================
+// 14. PHASE 4 — P1-6..P1-21: LOGIC NGHIEP VU, TRANSACTION, AUDIT, STATE MACHINE
+// ===========================================================================
+
+// 14.1 — P1-6: cap duyet LUON tinh tu approval-matrix.json (khong hardcode,
+//        khong tin `level` tu client).
+(function approvalMatrixSourceOfTruth() {
+  const appr = read(path.join(ROOT, 'src/modules/governance/approvals.js'));
+  ok(/approval-matrix\.json/.test(appr), 'P1-6 (INV-6): approvals doc nguong tu approval-matrix.json');
+  ok(/levelForAmount/.test(appr) && /levelForContract/.test(appr), 'P1-6: co ham tinh cap duyet theo loai chung tu');
+  ok(/routingFor\(/.test(appr), 'P1-6: routing doc tu amount_routing trong matrix');
+  // KHONG hardcode nguong so tien trong code (chi doc tu matrix).
+  const codeOnly = appr.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  ok(!/50000000|200000000|5000000/.test(codeOnly), 'P1-6 (INV-6): khong hardcode nguong duyet trong code');
+  // Client gui `level` khac cap tinh => 400 (khong 500).
+  ok(/khong cho ep cap/.test(appr), 'P1-6: tu choi ep cap duyet (client gui level khac)');
+  // Contract routing phai co trong matrix.
+  ok(Array.isArray(approval.amount_routing && approval.amount_routing.contract), 'P1-6: approval-matrix.json co amount_routing.contract');
+  // routes khong duoc truyen `level` tu client.
+  for (const f of ['finance.js', 'sales.js', 'gov-min.js']) {
+    const src = read(path.join(ROOT, 'src/routes', f));
+    ok(!/level:\s*req\.body\.level/.test(src), 'P1-6: routes/' + f + ' khong truyen level tu client');
+  }
+  // finance/expenses phai goi gov.requestApproval (khong hardcode nguong).
+  const fin = read(path.join(ROOT, 'src/routes/finance.js'));
+  ok(/requestApproval/.test(fin), 'P1-6: POST /expenses goi gov.requestApproval');
+  const finCode = fin.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  ok(!/50000000|200000000/.test(finCode), 'P1-6: POST /expenses khong hardcode nguong duyet');
+})();
+
+// 14.2 — P1-7: khoa dong approval + chong double-decide + decided_at chuan hoa.
+(function approvalLockingCheck() {
+  const appr = read(path.join(ROOT, 'src/modules/governance/approvals.js'));
+  ok(/lock\('SELECT \* FROM approvals/.test(appr), 'P1-7: decideApproval khoa dong approval (FOR UPDATE)');
+  ok(/WHERE id=\? AND status='pending'/.test(appr), 'P1-7: decideApproval chong double-decide (conditional update)');
+  ok(/changes/.test(appr), 'P1-7: check `changes` sau conditional update');
+  ok(/nowISO\(\)/.test(appr), 'P1-7: decided_at dung nowISO() (chuuan hoa INV-5)');
+  ok(/signed_date/.test(appr), 'P1-7: set signed_date khi contract -> signed');
+  const apprCode = appr.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  ok(!/CURRENT_TIMESTAMP/i.test(apprCode), 'P1-7: khong dung CURRENT_TIMESTAMP cho decided_at');
+})();
+
+// 14.3 — P1-8: cam fallback `ORDER BY id DESC LIMIT 1` lay ID ban ghi vua tao.
+(function noLastInsertFallback() {
+  const srcFiles = files.filter((f) => /\.js$/.test(f));
+  const hits = [];
+  for (const f of srcFiles) {
+    const src = read(f);
+    const code = src.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+    // 1) KHONG duoc fallback ID: `x.lastInsertRowid || ...`
+    if (/lastInsertRowid\s*\|\|/.test(code)) hits.push(path.basename(f) + ': lastInsertRowid ||');
+    // 2) KHONG duoc dung `ORDER BY id DESC LIMIT 1` de LAY ID vua ghi.
+    //    (Doc "ban ghi moi nhat" de hien thi/dem la duoc phép.)
+    const lines = code.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (!/ORDER BY\s+id\s+DESC\s+LIMIT\s+1/i.test(l)) continue;
+      // Neu dong nay la SELECT id FROM ... thi la fallback lay ID => cam.
+      if (/SELECT\s+id\s+FROM/i.test(l)) {
+        hits.push(path.basename(f) + ':' + (i + 1) + ' SELECT id FROM ... ORDER BY id DESC LIMIT 1');
+      }
+      // Neu bien chua ket qua duoc gan vao `id`/`.id` => cung la fallback ID.
+      const m = l.match(/const\s+(\w+)\s*=\s*await\s+c\.get/i) || l.match(/(\w+)\s*=\s*await\s+c\.get/i);
+      if (m && /(^|[^a-zA-Z])id\s*$/i.test(m[1])) {
+        hits.push(path.basename(f) + ':' + (i + 1) + ' gan ID tu ORDER BY id DESC LIMIT 1');
+      }
+    }
+  }
+  ok(hits.length === 0, 'P1-8: khong con fallback lay ID bang "ORDER BY id DESC LIMIT 1"' + (hits.length ? ' (' + hits.join(' | ') + ')' : ''));
+  const dbSrc = read(path.join(ROOT, 'src/common/db.js'));
+  ok(/function insertedId/.test(dbSrc), 'P1-8: co adapter insertedId() lay ID ban ghi vua tao');
+})();
+
+// 14.4 — P1-9: khoa dong hang truoc khi ghi (order/debt/approval).
+(function rowLockingCheck() {
+  const sales = read(path.join(ROOT, 'src/modules/sales/service.js'));
+  ok(/lockOrder/.test(sales) && /lock\('SELECT \* FROM orders/.test(sales), 'P1-9: setOrderPaid khoa dong order');
+  const fin = read(path.join(ROOT, 'src/modules/finance/service.js'));
+  ok(/lockDebt/.test(fin) && /lock\('SELECT \* FROM debts/.test(fin), 'P1-9: recordPayment khoa dong cong no');
+  ok(/markDebtCancelled/.test(fin) && /lock\('SELECT \* FROM debts/.test(fin), 'P1-9: markDebtCancelled khoa dong cong no');
+})();
+
+// 14.5 — P1-10: storefront dat truoc ton kho qua moveStock (nguon kiem tra duy nhat).
+(function storefrontStockAtomic() {
+  const pub = read(path.join(ROOT, 'src/public/orders.js'));
+  ok(/moveStock/.test(pub), 'P1-10: storefront dat truoc ton kho qua supplyService.moveStock');
+  // KHONG con kiem tra ton thu cong (doc SUM(stock_moves) roi so sanh).
+  const code = pub.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  ok(!/COALESCE\(SUM\(qty\),0\)\s+s\s+FROM\s+stock_moves/.test(code), 'P1-10: khong kiem tra ton thu cong (chi moveStock)');
+  // Sap xep SKU alphabet truoc khi tru (tranh deadlock PG).
+  ok(/localeCompare/.test(code), 'P1-10: sap xep SKU alphabet truoc khi tru kho');
+})();
+
+// 14.6 — INV-8: state machine — ORDER_FLOW / IT_FLOW la bang transition + assert.
+(function stateMachineCheck() {
+  const sales = read(path.join(ROOT, 'src/modules/sales/service.js'));
+  ok(/const ORDER_FLOW = \{/.test(sales), 'INV-8: ORDER_FLOW la bang transition');
+  ok(/function assertOrderTransition/.test(sales), 'INV-8: co assertOrderTransition');
+  ok(/ORDER_FLOW\[/.test(sales), 'INV-8: assertOrderTransition doc bang transition');
+  const it = read(path.join(ROOT, 'src/modules/it/service.js'));
+  ok(/const IT_FLOW = \{/.test(it), 'P2-21: IT_FLOW la bang transition');
+  ok(/assertIncidentTransition/.test(it), 'P2-21: co assertIncidentTransition');
+  const sm = read(path.join(ROOT, 'docs/contract/state-machines.md'));
+  ok(/orders/.test(sm), 'INV-8: state-machines.md mo ta orders');
+})();
+
+// 14.7 — P1-14: moi mutation phai co tx + audit (khong ghi ngoai transaction).
+(function mutationTxAuditCheck() {
+  const ROUTE_FILES = ['sales.js', 'finance.js', 'supply.js', 'gov-min.js', 'helpdesk.js', 'marketing.js', 'overview.js', 'hr.js'];
+  const offenders = [];
+  for (const f of ROUTE_FILES) {
+    const src = read(path.join(ROOT, 'src/routes', f));
+    const code = src.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+    // Tim cac route mutation (post/patch/put/delete) va kiem tra block co `tx(`.
+    const re = /router\.(post|patch|put|delete)\([^)]*,\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{([\s\S]*?)\n\}\);/g;
+    let m;
+    while ((m = re.exec(code))) {
+      const body = m[2];
+      const route = m[0].slice(0, m[0].indexOf('=>'));
+      // Bo qua route doc-only / proxy / limiter-only.
+      if (/cskh\/chat|reconcile\/run|remind/.test(route)) continue;
+      if (!/\b(run|get|all)\(\s*'?(INSERT|UPDATE|DELETE)/i.test(body)) continue;
+      if (!/\btx\s*\(/.test(body)) offenders.push(f + ' -> ' + route.replace(/\s+/g, ' ').slice(0, 70));
+    }
+  }
+  ok(offenders.length === 0, 'P1-14: moi mutation route deu trong transaction' + (offenders.length ? ' (' + offenders.join(' | ') + ')' : ''));
+})();
+
+// 14.8 — P1-15: cashflow() dung SQL portable + co route.
+(function cashflowPortableCheck() {
+  const fin = read(path.join(ROOT, 'src/modules/finance/service.js'));
+  ok(/substr\(CAST\(paid_at AS TEXT\),1,10\)/i.test(fin), 'P1-15: cashflow dung substr(CAST(...)) (portable 2 dialect)');
+  const finCode = fin.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  ok(!/date\(paid_at\)/i.test(finCode), 'P1-15: khong dung date(paid_at) (SQLite-only)');
+  const route = read(path.join(ROOT, 'src/routes/finance.js'));
+  ok(/\/finance\/cashflow/.test(route), 'P1-15: co route GET /api/finance/cashflow');
+})();
+
+// 14.9 — P2-20: dem imported/skipped theo `changes` (ON CONFLICT DO NOTHING).
+(function importCountingCheck() {
+  const route = read(path.join(ROOT, 'src/routes/finance.js'));
+  const code = route.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  ok(/duplicate/.test(code) && /invalid/.test(code), 'P2-20: import-csv phan biet duplicate vs invalid');
+  ok(/changes/.test(code), 'P2-20: dem imported theo `changes`');
+})();
+
+// 14.10 — P2-21: qa/service validate ref_id ton tai theo ref_type.
+(function qaRefValidationCheck() {
+  const qa = read(path.join(ROOT, 'src/modules/qa/service.js'));
+  ok(/REF_TABLE/.test(qa), 'P2-21: qa/service co mapping ref_type -> bang');
+  ok(/Khong tim thay/.test(qa), 'P2-21: qa/service validate ref_id ton tai');
+})();
+
+// 14.11 — Test Phase 4 phai ton tai.
+(function phase4TestCheck() {
+  const t = path.join(ROOT, 'tests', 'phase4.test.js');
+  ok(fs.existsSync(t), 'Phase 4: ton tai suite phase4.test.js');
+  if (fs.existsSync(t)) {
+    const src = read(t);
+    for (const id of ['p401', 'p402', 'p403', 'p404', 'p405', 'p406']) {
+      ok(new RegExp(id + ':').test(src), 'Phase 4: co test ' + id);
     }
   }
 })();

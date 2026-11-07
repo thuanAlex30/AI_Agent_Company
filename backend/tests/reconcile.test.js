@@ -32,6 +32,9 @@ async function cleanup() {
   await run("DELETE FROM payments WHERE note LIKE '%RC0%' OR note LIKE '%recon%' OR note LIKE '%RECTEST%' OR order_id IN (SELECT id FROM orders WHERE code LIKE 'DHR%')");
   await run("DELETE FROM reminder_log WHERE debt_id IN (SELECT id FROM debts WHERE note LIKE 'RECTEST%' OR order_id IN (SELECT id FROM orders WHERE code LIKE 'DHR%'))");
   await run("DELETE FROM transactions WHERE bank_ref LIKE 'RC%'");
+  // Don cac giao dich `unmatched` con lai cua test khac (P4-*, ...) de
+  // `recon2` khong dem nham (total phai dung 9 dong RC).
+  await run("DELETE FROM transactions WHERE status='unmatched'");
   await run("DELETE FROM debts WHERE note LIKE 'RECTEST%' OR order_id IN (SELECT id FROM orders WHERE code LIKE 'DHR%')");
   await run('DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE code LIKE \'DHR%\')');
   await run('DELETE FROM shipments WHERE order_id IN (SELECT id FROM orders WHERE code LIKE \'DHR%\')');
@@ -70,7 +73,7 @@ async function tokenKetToan() {
   return login.body.data.token;
 }
 
-test('recon1: import CSV 10 dong -> imported 9 / skipped 1', async () => {
+test('recon1: import CSV 10 dong -> imported 8 / skipped 2 (P2-20: dem theo changes)', async () => {
   await cleanup();
   const token = await tokenKetToan();
   const res = await request(app).post('/api/transactions/import-csv')
@@ -78,8 +81,13 @@ test('recon1: import CSV 10 dong -> imported 9 / skipped 1', async () => {
     .attach('file', path.join(__dirname, 'fixtures/statement.csv'));
   assert.equal(res.body.ok, true);
   assert.equal(res.body.data.total, 10);
-  assert.equal(res.body.data.imported, 9);
-  assert.equal(res.body.data.skipped, 1);
+  // P2-20: imported = so ban ghi THAT SU ghi moi (changes===1).
+  //   RC001 bi trung (duplicate) + RC999 thieu tien (invalid) => skipped 2.
+  assert.equal(res.body.data.imported, 8);
+  assert.equal(res.body.data.skipped, 2);
+  // Phan biet 2 nhom skipped (duplicate vs invalid)
+  assert.equal(res.body.data.duplicate, 1);
+  assert.equal(res.body.data.invalid, 1);
 });
 
 test('recon2: reconcile -> matched 8/9 (partial DH001 theo remain)', async () => {

@@ -196,9 +196,12 @@ async function setOrderPaid(conn, orderId, actor) {
         if (Number(up?.changes || 0) !== 1) {
           throw new AppError('CONFLICT', 'Don vua bi cap nhat boi giao dich khac — thu lai', 409);
         }
+        // Audit TUNG BUOC (partial -> paid la 2 buoc rieng) de khong
+        // "nhay" qua trang thai trung gian.
+        await writeAudit(c, actor || 'system', 'update', 'orders', orderId, { status: cur }, { status: step });
         cur = step;
       }
-      await writeAudit(c, actor || 'system', 'update', 'orders', orderId, { status: oldStatus }, { status: ns });
+      return { id: orderId, status: ns, paidSum };
     }
     return { id: orderId, status: ns, paidSum };
   }, conn);

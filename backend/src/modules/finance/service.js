@@ -62,8 +62,12 @@ async function markDebtCancelled(conn, orderId, actor) {
   const c = dbConn(conn, db);
   const rows = await c.query('SELECT * FROM debts WHERE order_id=?', [orderId]);
   for (const d of rows) {
+    // P1-9: khoa dong cong no truoc khi ghi (chong ghi de/lost-update).
+    const cur = typeof c.lock === 'function'
+      ? (await c.lock('SELECT * FROM debts WHERE id=?', [d.id])) || d
+      : d;
     await c.run("UPDATE debts SET status='cancelled' WHERE id=?", [d.id]);
-    await writeAudit(c, actor || 'system', 'update', 'debts', d.id, { status: d.status }, { status: 'cancelled' });
+    await writeAudit(c, actor || 'system', 'update', 'debts', d.id, { status: cur.status }, { status: 'cancelled' });
   }
 }
 
