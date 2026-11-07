@@ -1009,10 +1009,23 @@ function mutationRoutes(src) {
   // (e) csrfGuard + refreshLimiter.
   ok(/csrfGuard/.test(sec) && /refreshLimiter/.test(sec), 'AUTH: co csrfGuard + refreshLimiter');
   ok(/loginLimiter/.test(sec) && /loginUserLimiter/.test(sec), 'AUTH: co loginLimiter + loginUserLimiter');
-  // (f) ACCESS_TTL <= 30m.
-  const m = auth.match(/ACCESS_TTL\s*=\s*process\.env\.ACCESS_TTL\s*\|\|\s*'(\d+)m'/);
+  // (f) ACCESS_TTL <= 30m (default 30 phut).
+  const ttlBlock = (() => {
+    const i = auth.indexOf('const ACCESS_TTL ');
+    return i === -1 ? '' : auth.slice(i, i + 300);
+  })();
+  const m = ttlBlock.match(/'(\d+)m'/) || ttlBlock.match(/\|\|\s*'(\d+)m'/);
   ok(!!m, 'AUTH: ACCESS_TTL co default dang phut');
-  if (m) ok(Number(m[1]) <= 30, 'AUTH: ACCESS_TTL <= 30 phut (hien tai ' + m[1] + 'm)');
+  if (m) {
+    const mins = Number(m[1]);
+    ok(mins <= 30, 'AUTH: ACCESS_TTL <= 30 phut (hien tai ' + m + 'm)');
+  }
+  ok(/ACCESS_TTL_MINUTES/.test(auth), 'AUTH: ho tro ACCESS_TTL_MINUTES (dung dang so phut)');
+  ok(/MAX_SESSIONS_PER_USER/.test(auth), 'AUTH: ho tro MAX_SESSIONS_PER_USER (ten chuan v8.1)');
+  ok(/CSRF_ENABLED/.test(sec), 'SEC: CSRF_ENABLED doc tu env (bat/tat csrfGuard)');
+  ok(/NODE_ENV\s*===\s*'production'[\s\S]{0,200}CSRF_ENABLED/.test(sec)
+    || /CSRF_ENABLED[\s\S]{0,200}NODE_ENV\s*===\s*'production'/.test(sec),
+    'SEC: fail-fast khi production tat CSRF');
   // (g) route auth: login/refresh/logout/logout-all/sessions/me deu ton tai.
   for (const r of ['/login', '/refresh', '/logout', '/logout-all', '/sessions', '/me']) {
     ok(new RegExp("router\\.(post|get|delete)\\('" + r.replace('/', '\\/') + "'").test(authRoute), 'AUTH: co route ' + r);

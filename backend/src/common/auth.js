@@ -12,10 +12,16 @@ if (process.env.NODE_ENV === 'production' && !JWT_SECRET) {
   throw new Error('Thieu JWT_SECRET khi NODE_ENV=production (fail-fast)');
 }
 // Phase 2 (P1-13): access token rut ngan 30p (truoc 8h) + refresh tu dong o FE.
-const ACCESS_TTL = process.env.ACCESS_TTL || '30m';
+// ACCESS_TTL (dung dang "30m") hoac ACCESS_TTL_MINUTES (dung dang so phut).
+const ACCESS_TTL_MINUTES = Number(process.env.ACCESS_TTL_MINUTES || 0) || null;
+const ACCESS_TTL = process.env.ACCESS_TTL
+  || (ACCESS_TTL_MINUTES ? `${ACCESS_TTL_MINUTES}m` : '30m');
 const REFRESH_DAYS = Number(process.env.REFRESH_DAYS || 7);
 // Phase 2 (P1-12): toi da 5 phien dong thoi cho 1 user.
-const MAX_SESSIONS = Number(process.env.MAX_SESSIONS || 5);
+// MAX_SESSIONS_PER_USER la ten chuan (prompt v8.1); MAX_SESSIONS la alias cu.
+const MAX_SESSIONS = Number(
+  process.env.MAX_SESSIONS_PER_USER || process.env.MAX_SESSIONS || 5
+);
 
 /**
  * Phase 1 (P0-1) — ID người dùng dạng SỐ.
@@ -409,5 +415,5 @@ function userPermissions(role) {
 module.exports = {
   login, refresh, logout, logoutAll, authenticate, requirePerm, filterEmployeeRow,
   userPermissions, signAccess, actorId, deviceLabel, listSessions, revokeSession,
-  bumpAuthVersion, ACCESS_TTL, REFRESH_DAYS, MAX_SESSIONS,
+  bumpAuthVersion, ACCESS_TTL, ACCESS_TTL_MINUTES, REFRESH_DAYS, MAX_SESSIONS,
 };

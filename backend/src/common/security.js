@@ -134,7 +134,15 @@ const loginUserLimiter = rateLimit({
 const CSRF_SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const CSRF_EXEMPT_PATHS = [/^\/api\/public\//, /^\/api\/auth\/login$/, /^\/api\/auth\/refresh$/];
 
+// CSRF_ENABLED=0 tat guard (chi dung cho test/tool CLI).
+// Production BAT BUOC bat: fail-fast neu production tat.
+const CSRF_ENABLED = (process.env.CSRF_ENABLED || '1') !== '0';
+if (process.env.NODE_ENV === 'production' && !CSRF_ENABLED) {
+  throw new Error('CSRF_ENABLED=0 khong duoc phep khi NODE_ENV=production (fail-fast)');
+}
+
 function csrfGuard(req, res, next) {
+  if (!CSRF_ENABLED) return next();
   if (CSRF_SAFE_METHODS.has(req.method)) return next();
   const path = String(req.originalUrl || req.url || '').split('?')[0];
   if (CSRF_EXEMPT_PATHS.some((re) => re.test(path))) return next();
@@ -160,6 +168,6 @@ function newCsrfToken() { return crypto.randomBytes(32).toString('hex'); }
 
 module.exports = {
   applySecurity, loginLimiter, apiLimiter, publicLimiter, chatLimiter,
-  refreshLimiter, loginUserLimiter, csrfGuard, newCsrfToken,
+  refreshLimiter, loginUserLimiter, csrfGuard, newCsrfToken, CSRF_ENABLED,
   clientIp, clientSignature, publicKey, resolveTrustProxy,
 };
