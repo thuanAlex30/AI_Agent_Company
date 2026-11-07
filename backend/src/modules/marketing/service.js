@@ -1,5 +1,6 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
+const { insertedId } = require('../../common/db');
 
 // marketing: ROI CHI tu v_campaign_roi (JOIN leads), cpo>200k alert.
 async function roi(conn) {
@@ -21,7 +22,7 @@ async function createCampaign(conn, { name, channel, cost = 0, start_date = null
   if (!name) throw new AppError('VALIDATION', 'Campaign can name', 400);
   if (!['facebook', 'tiktok', 'zalo', 'shopee', 'offline', 'seo'].includes(channel)) throw new AppError('VALIDATION', 'channel khong hop le', 400);
   const r = await c.run('INSERT INTO campaigns(name,channel,cost,start_date,end_date) VALUES(?,?,?,?,?)', [name, channel, cost, start_date, end_date]);
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM campaigns ORDER BY id DESC LIMIT 1'))?.id;
+  const id = insertedId(r, 'campaigns');
   await writeAudit(c, actor || 'system', 'create', 'campaigns', id, null, { name, channel });
   return { id };
 }

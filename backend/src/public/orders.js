@@ -4,7 +4,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { ok, fail, AppError } = require('../common/errors');
-const { all, get, tx } = require('../common/db');
+const { all, get, tx, insertedId } = require('../common/db');
 const { reqStr, reqIntPos } = require('../common/validate');
 const { publicOrderLimiter } = require('./limiters');
 const { resolvePrice } = require('./price');
@@ -45,7 +45,7 @@ async function findOrCreateCustomer(c, { name, phone, email, address }) {
     'INSERT INTO customers(code,name,phone,email,address,type,contact_hash) VALUES(?,?,?,?,?,?,?)',
     [code, sanitize(name, 120), ph || null, em || null, sanitize(address, 300), 'retail', hash]
   );
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM customers WHERE code=?', [code]))?.id;
+  const id = insertedId(r, 'customers');
   return c.get('SELECT * FROM customers WHERE id=?', [id]);
 }
 
@@ -77,9 +77,12 @@ router.post('/orders', publicOrderLimiter, async (req, res) => {
       }
       const cust = await findOrCreateCustomer(c, { name, phone, email, address });
       // Resolve giá + explode combo
+      // P1-10: KHONG kiem tra ton thu cong o day — nguon kiem tra ton DUY NHAT
+      // la supplyService.moveStock (co lock + kiem tra ton) chay trong cung tx.
+      // Kiem tra thu cong co the LECH voi moveStock (race) => oversell.
       let amount = 0;
       const lines = []; // {sku, qty, price, cost, is_parent}
-      const stockOuts = []; // {sku, qty(âm)}
+      const stockOuts = []; // {sku, qty(am)}
       for (const it of items) {
         const sku = String(it.sku || '').slice(0, 32);
         const qty = Number(it.qty);
@@ -93,14 +96,11 @@ router.post('/orders', publicOrderLimiter, async (req, res) => {
           const parts = await c.query('SELECT * FROM product_combos WHERE parent_sku=?', [sku]);
           if (!parts.length) throw new AppError('VALIDATION', `Combo ${sku} chua cau hinh thanh phan`, 400);
           for (const pt of parts) {
-            const need = Number(pt.qty) * qty;
-            const on = (await c.get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [pt.child_sku]))?.s || 0;
-            if (Number(on) < need) throw new AppError('STOCK_SHORTAGE', `Combo het hang (thieu ${pt.child_sku})`, 409);
-            stockOuts.push({ sku: pt.child_sku, qty: -need });
+            // Combo tru kho THANH PHAN (khong tru combo cha).
+            stockOuts.push({ sku: pt.child_sku, qty: -(Number(pt.qty) * qty) });
           }
         } else {
-          const on = (await c.get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [sku]))?.s || 0;
-          if (Number(on) < qty) throw new AppError('STOCK_SHORTAGE', `Kho khong du ${sku} (ton ${on})`, 409);
+          stockOuts.push({ sku, qty: -qty });
         }
       }
       if (amount <= 0) throw new AppError('VALIDATION', 'amount phai > 0', 400);
@@ -114,13 +114,25 @@ router.post('/orders', publicOrderLimiter, async (req, res) => {
         // Phase 1 (P0-1): created_by la BIGINT -> don web khong co user ERP => NULL.
         [code, cust.id, null, amount, status, todayVN(), null, idemKey, 'storefront', lookupCode]
       );
-      const orderId = r.lastInsertRowid || (await c.get('SELECT id FROM orders WHERE code=?', [code]))?.id;
+      const orderId = insertedId(r, 'orders');
       for (const ln of lines) {
         await c.run('INSERT INTO order_items(order_id,product_sku,qty,price,cost) VALUES(?,?,?,?,?)', [orderId, ln.sku, ln.qty, ln.price, ln.cost]);
       }
       const supplyService = require('../modules/supply/service');
       const financeService = require('../modules/finance/service');
-      for (const so of stockOuts.length ? stockOuts : lines.map(l => ({ sku: l.sku, qty: -l.qty }))) {
+      // P1-10: (d) DAT TRUOC TON KHO — nguon kiem tra ton DUY NHAT.
+      //   moveStock khoa dong theo SKU + nem STOCK_SHORTAGE (409) neu thieu;
+      //   tx rollback toan bo => khong tao don thieu hang.
+      //   Gom theo SKU (tru 2 dong cung SKU) + sap xep ALPHABET de thu tu
+      //   khoa on dinh (tranh deadlock tren PostgreSQL).
+      const agg = new Map();
+      for (const so of stockOuts) {
+        agg.set(so.sku, Number(agg.get(so.sku) || 0) + Number(so.qty));
+      }
+      const sortedOuts = [...agg.entries()]
+        .map(([sku, qty]) => ({ sku, qty }))
+        .sort((a, b) => a.sku.localeCompare(b.sku));
+      for (const so of sortedOuts) {
         await supplyService.moveStock(c, { sku: so.sku, type: 'out', qty: so.qty, ref_code: code, created_by: null, actor: 'storefront', idempotency_key: idemKey ? `stk-${idemKey}-${so.sku}` : null });
       }
       // Phase 0.5: due_date = ngay VN + 7.
@@ -170,7 +182,7 @@ router.post('/service-requests', publicOrderLimiter, async (req, res) => {
       if (!cust) {
         const code = 'KH-WEB-' + String(Date.now()).slice(-6) + Math.floor(Math.random() * 90 + 10);
         const r = await c.run('INSERT INTO customers(code,name,phone,email,type,contact_hash) VALUES(?,?,?,?,?,?)', [code, name, phone, email, 'retail', contactHash(phone, email)]);
-        const id = r.lastInsertRowid || (await c.get('SELECT id FROM customers WHERE code=?', [code]))?.id;
+        const id = insertedId(r, 'customers');
         cust = await c.get('SELECT * FROM customers WHERE id=?', [id]);
       }
       const reqCode = 'SRV-' + String(Date.now()).slice(-8);
@@ -178,7 +190,7 @@ router.post('/service-requests', publicOrderLimiter, async (req, res) => {
         'INSERT INTO service_requests(code,service_id,customer_id,name,phone,email,slot_time,party_size,location,tax_code,note,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
         [reqCode, svc.id, cust.id, name, phone, email, slotTime, partySize, location || null, taxCode, note || null, 'new']
       );
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM service_requests WHERE code=?', [reqCode]))?.id;
+      const id = insertedId(r, 'service_requests');
       const hd = require('../modules/helpdesk/service');
       const tck = await hd.createTicket(c, { customer_id: cust.id, category: 'policy_inquiry', subject: `Dat lich ${svc.code} ${reqCode}`, content: `${name} ${phone} slot ${slotTime || 'lien he'} x${partySize || '?'} @${location || '?'} MST:${taxCode || '-'} — ${note}`.slice(0, 500), priority: 'normal', actor: 'storefront' });
       const { writeAudit } = require('../common/audit');

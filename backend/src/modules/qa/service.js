@@ -1,5 +1,6 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
+const { insertedId } = require('../../common/db');
 
 // qa so huu: qa_checks
 async function list(conn) {
@@ -13,7 +14,7 @@ async function create(conn, { ref_type, ref_id, result, defect = null, repeat_of
   if (!['order', 'shipment', 'product'].includes(ref_type)) throw new AppError('VALIDATION', 'ref_type khong hop le', 400);
   if (!['pass', 'fail'].includes(result)) throw new AppError('VALIDATION', 'result pass/fail', 400);
   const r = await c.run('INSERT INTO qa_checks(ref_type,ref_id,result,defect,repeat_of,checker) VALUES(?,?,?,?,?,?)', [ref_type, ref_id, result, defect, repeat_of, checker]);
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM qa_checks ORDER BY id DESC LIMIT 1'))?.id;
+  const id = insertedId(r, 'qa_checks');
   await writeAudit(c, checker || 'system', 'create', 'qa_checks', id, null, { ref_type, ref_id, result });
   return { id };
 }

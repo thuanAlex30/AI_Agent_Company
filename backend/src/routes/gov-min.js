@@ -29,9 +29,12 @@ router.post('/approvals', requirePerm('approvals.request'), async (req, res) => 
     };
     const tbl = REF_TABLE[refType];
     if (tbl) await assertBusinessScope(null, req.user, tbl, refId);
+    // P1-6: KHONG truyen `level` tu client — cap duyet LUON tinh tu
+    // approval-matrix.json trong gov.requestApproval.
     const out = await gov.requestApproval(null, {
       ref_type: refType, ref_id: refId,
-      requester: req.user.id, level: req.body.level || null, note: req.body.note || null,
+      requester: req.user.id, requester_username: req.user.username,
+      note: req.body.note || null,
     });
     // Phase 3: gan phong ban cho approval (theo chung tu).
     const { tx: dbtx } = require('../common/db');
@@ -46,7 +49,8 @@ router.post('/approvals/:id/decide', requirePerm('approvals.decide'), async (req
     // Phase 3 (P0-4): chi quyet approval trong pham vi scope.
     await assertBusinessScope(null, req.user, 'approvals', req.params.id);
     return ok(res, await gov.decideApproval(null, req.params.id, {
-      decider: req.user.id, decision: req.body.decision, note: req.body.note || null,
+      decider: req.user.id, decider_username: req.user.username,
+      decision: req.body.decision, note: req.body.note || null,
     }));
   } catch (e) { return fail(res, e); }
 });

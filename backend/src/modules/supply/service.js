@@ -1,5 +1,6 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
+const { insertedId } = require('../../common/db');
 const { setBusinessScope, resolveResourceDept } = require('../../common/scope');
 
 async function withTx(fn, conn) {
@@ -52,7 +53,7 @@ async function moveStock(conn, { sku, type, qty, ref_code = null, created_by = n
       'INSERT INTO stock_moves(product_sku,type,qty,ref_code,created_by,idempotency_key) VALUES(?,?,?,?,?,?)',
       [sku, type, qty, ref_code, created_by, idempotency_key]
     );
-    const id = r.lastInsertRowid || (await c.get('SELECT id FROM stock_moves WHERE product_sku=? ORDER BY id DESC LIMIT 1', [sku]))?.id;
+    const id = insertedId(r, 'stock_moves');
     // Phase 3: stock_moves thuoc phong ban supply.
     await setBusinessScope(c, 'stock_moves', id, 'supply');
     await writeAudit(c, actor || 'system', 'create', 'stock_moves', id, null, { sku, type, qty, ref_code });
@@ -67,7 +68,7 @@ async function createShipment(conn, { order_id, carrier = null, created_by = nul
     const ex = await c.get('SELECT * FROM shipments WHERE order_id=? ORDER BY id DESC LIMIT 1', [order_id]);
     if (ex && ['pending', 'shipping'].includes(ex.status)) return { id: ex.id, deduped: true };
     const r = await c.run("INSERT INTO shipments(order_id,carrier,status,ship_fee,attempt) VALUES(?,?,'pending',0,1)", [order_id, carrier]);
-    const id = r.lastInsertRowid || (await c.get('SELECT id FROM shipments WHERE order_id=? ORDER BY id DESC LIMIT 1', [order_id]))?.id;
+    const id = insertedId(r, 'shipments');
     // Phase 3: shipment theo don (neu co) — fallback supply.
     const shipDept = dept || await resolveResourceDept(c, 'shipments', { orderId: order_id });
     await setBusinessScope(c, 'shipments', id, shipDept);
@@ -102,7 +103,7 @@ async function createPO(conn, { code, supplier_id = null, amount, need_date = nu
       "INSERT INTO purchase_orders(code,supplier_id,amount,status,need_date,created_by,idempotency_key) VALUES(?, ?,?, 'draft',?,?,?)",
       [code, supplier_id, amount, need_date, created_by, idempotency_key]
     );
-    const id = r.lastInsertRowid || (await c.get('SELECT id FROM purchase_orders WHERE code=?', [code]))?.id;
+    const id = insertedId(r, 'purchase_orders');
     // Phase 3: PO thuoc phong ban supply.
     await setBusinessScope(c, 'purchase_orders', id, 'supply');
     await writeAudit(c, actor || 'system', 'create', 'purchase_orders', id, null, { code, amount });

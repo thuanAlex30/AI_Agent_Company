@@ -1,12 +1,13 @@
 const express = require('express');
 const { authenticate, requirePerm, actorId } = require('../common/auth');
 const { ok, fail, AppError } = require('../common/errors');
-const { get, all, run, tx } = require('../common/db');
+const { get, all, run, tx, insertedId } = require('../common/db');
 const { reqStr, reqIntPos, reqCode } = require('../common/validate');
 const {
   scopeFilter, assertResourceScope, assertBusinessScope, enforceDept,
   requireScoped, scopedList, setBusinessScope, resolveResourceDept,
 } = require('../common/scope');
+const { writeAudit } = require('../common/audit');
 const salesService = require('../modules/sales/service');
 
 const router = express.Router();
@@ -29,13 +30,12 @@ router.post('/customers', requireScoped('customers.write'), async (req, res) => 
     const name = reqStr(req.body, 'name', { max: 200 });
     const phone = reqStr(req.body, 'phone', { optional: true, max: 20 });
     const type = reqStr(req.body, 'type', { optional: true, enum: ['retail', 'wholesale', 'enterprise'] }) || 'retail';
-    const { writeAudit } = require('../common/audit');
     // GOV-01: ghi du lieu + audit trong CUNG transaction.
     // Phase 3: ghi resource_dept trong CUNG transaction (fail-closed scope).
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO customers(code,name,phone,type,owner_employee_id) VALUES(?,?,?,?,?)',
         [code, name, phone || null, type, req.body.owner_employee_id || null]);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM customers WHERE code=?', [code]))?.id;
+      const id = insertedId(r, 'customers');
       const dept = await resolveResourceDept(c, 'customers', { ownerEmployeeId: req.body.owner_employee_id || null });
       await setBusinessScope(c, 'customers', id, dept, req.body.owner_employee_id || null);
       await writeAudit(c, req.user.username, 'create', 'customers', id, null, { code, name, dept });
@@ -66,14 +66,13 @@ router.post('/leads', requireScoped('leads.write'), async (req, res) => {
   try {
     const name = reqStr(req.body, 'name', { max: 200 });
     const phone = reqStr(req.body, 'phone', { max: 20 });
-    const { writeAudit } = require('../common/audit');
     const out = await tx(async (c) => {
       // Phase 3: lead thuoc ve nhan vien tao (owner) — khong cho client
       // chi dinh owner_employee_id bat ky (chong IDOR ghi vao phong ban khac).
       const ownerId = req.body.owner_employee_id || null;
       const r = await c.run('INSERT INTO leads(name,phone,source,stage,owner_employee_id) VALUES(?,?,?,?,?)',
         [name, phone, req.body.source || null, 'new', ownerId]);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM leads WHERE phone=? ORDER BY id DESC LIMIT 1', [phone]))?.id;
+      const id = insertedId(r, 'leads');
       const dept = await resolveResourceDept(c, 'leads', { ownerEmployeeId: ownerId });
       await setBusinessScope(c, 'leads', id, dept, ownerId);
       await writeAudit(c, req.user.username, 'create', 'leads', id, null, { name, phone, dept });
@@ -101,11 +100,10 @@ router.post('/quotes', requireScoped('quotes.write'), async (req, res) => {
   try {
     const code = reqCode(req.body, 'code');
     const amount = reqIntPos(req.body, 'amount');
-    const { writeAudit } = require('../common/audit');
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO quotes(code,lead_id,customer_id,amount,status,created_by) VALUES(?,?,?,?,?,?)',
         [code, req.body.lead_id || null, req.body.customer_id || null, amount, 'draft', actorId(req.user)]);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM quotes WHERE code=?', [code]))?.id;
+      const id = insertedId(r, 'quotes');
       const dept = await resolveResourceDept(c, 'quotes', { customerId: req.body.customer_id || null });
       await setBusinessScope(c, 'quotes', id, dept);
       await writeAudit(c, req.user.username, 'create', 'quotes', id, null, { code, amount, dept });
@@ -128,11 +126,10 @@ router.post('/contracts', requireScoped('quotes.write'), async (req, res) => {
     const code = reqCode(req.body, 'code');
     const amount = reqIntPos(req.body, 'amount');
     const customer_id = reqIntPos(req.body, 'customer_id');
-    const { writeAudit } = require('../common/audit');
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO contracts(code,customer_id,quote_id,amount,status,created_by) VALUES(?,?,?,?,?,?)',
         [code, customer_id, req.body.quote_id || null, amount, 'draft', actorId(req.user)]);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM contracts WHERE code=?', [code]))?.id;
+      const id = insertedId(r, 'contracts');
       const dept = await resolveResourceDept(c, 'contracts', { customerId: customer_id });
       await setBusinessScope(c, 'contracts', id, dept);
       await writeAudit(c, req.user.username, 'create', 'contracts', id, null, { code, amount, dept });
@@ -148,21 +145,32 @@ router.post('/contracts/:id/submit-approval', requireScoped('quotes.write'), asy
     await assertBusinessScope(null, req.user, 'contracts', req.params.id);
     const ct = await get('SELECT * FROM contracts WHERE id=?', [req.params.id]);
     if (!ct) throw new AppError('NOT_FOUND', 'Khong tim thay hop dong', 404);
-    // INV-6: nguong duyet LAY TU approval-matrix.json (khong hardcode 50tr).
+    // P1-6: cap duyet LUON tinh tu approval-matrix.json (goi gov.requestApproval)
+    // — KHONG hardcode 50tr, KHONG tin `level` tu client.
     const gov = require('../modules/governance/approvals');
-    const level = gov.levelForContract(Number(ct.amount));
-    const { writeAudit } = require('../common/audit');
-    await tx(async (c) => {
+    const out = await tx(async (c) => {
       await c.run('UPDATE contracts SET status=? WHERE id=?', ['pending_approval', ct.id]);
-      await c.run('INSERT INTO approvals(ref_type,ref_id,requester,level,status) VALUES(?,?,?,?,?)',
-        ['contract', ct.id, req.user.id, level, 'pending']);
-      if (gov.needsLegal('contract', Number(ct.amount), ct.code)) {
-        await c.run('INSERT INTO approvals(ref_type,ref_id,requester,level,status) VALUES(?,?,?,?,?)',
-          ['contract', ct.id, req.user.id, 'legal', 'pending']);
+      const ap = await gov.requestApproval(c, {
+        ref_type: 'contract', ref_id: ct.id,
+        requester: req.user.id, requester_username: req.user.username,
+        note: req.body.note || null,
+      });
+      // P1-6: cap duyet BO SUNG (legal) theo approval-matrix.json
+      // (`amount_routing.contract_extra_legal`) — 1 approval rieng biet.
+      for (const lv of gov.extraLevelsFor('contract', Number(ct.amount), req.body.note || '')) {
+        if (lv === ap.level) continue;
+        const extra = await gov.requestApproval(c, {
+          ref_type: 'contract', ref_id: ct.id,
+          requester: req.user.id, requester_username: req.user.username,
+          level: lv, note: req.body.note || null,
+        });
+        await setBusinessScope(c, 'approvals', extra.id, req.user.dept_code || 'sales');
       }
-      await writeAudit(c, req.user.username, 'update', 'contracts', ct.id, { status: ct.status }, { status: 'pending_approval', level });
+      await setBusinessScope(c, 'approvals', ap.id, req.user.dept_code || 'sales');
+      await writeAudit(c, req.user.username, 'update', 'contracts', ct.id, { status: ct.status }, { status: 'pending_approval', level: ap.level });
+      return ap;
     });
-    return ok(res, { id: ct.id, status: 'pending_approval', level });
+    return ok(res, { id: ct.id, status: 'pending_approval', level: out.level });
   } catch (e) { return fail(res, e); }
 });
 

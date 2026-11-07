@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
+const { insertedId } = require('../../common/db');
 
 function loadSlaHours() {
   const m = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '..', 'docs/contract/manifest.json'), 'utf8'));
@@ -27,7 +28,7 @@ async function createTicket(conn, { customer_id = null, category = 'easy', subje
     'INSERT INTO tickets(code,customer_id,category,subject,content,status,priority,sla_due) VALUES(?,?,?,?,?,?,?,?)',
     [code, customer_id, category, subject, content, 'open', priority, due]
   );
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM tickets WHERE code=?', [code]))?.id;
+  const id = insertedId(r, 'tickets');
   await writeAudit(c, actor || 'system', 'create', 'tickets', id, null, { code, priority });
   return { id, code, sla_due: due };
 }
@@ -80,7 +81,7 @@ async function addRating(conn, { customer_id, order_id = null, ticket_id = null,
   const cust = await c.get('SELECT * FROM customers WHERE id=?', [customer_id]);
   if (!cust) throw new AppError('NOT_FOUND', 'Khong tim thay khach hang', 404);
   const r = await c.run('INSERT INTO ratings(customer_id,order_id,ticket_id,stars,comment) VALUES(?,?,?,?,?)', [customer_id, order_id, ticket_id, stars, comment]);
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM ratings ORDER BY id DESC LIMIT 1'))?.id;
+  const id = insertedId(r, 'ratings');
   await writeAudit(c, actor || 'system', 'create', 'ratings', id, null, { customer_id, stars });
   return { id };
 }

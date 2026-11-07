@@ -1,5 +1,6 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
+const { insertedId } = require('../../common/db');
 
 // product so huu: product_features
 async function list(conn) {
@@ -13,7 +14,7 @@ async function create(conn, { title, stage = 'idea', owner = null, actor = null 
   if (!title) throw new AppError('VALIDATION', 'Feature can title', 400);
   if (!['idea', 'spec', 'building', 'testing', 'released'].includes(stage)) throw new AppError('VALIDATION', 'stage khong hop le', 400);
   const r = await c.run('INSERT INTO product_features(title,stage,owner) VALUES(?,?,?)', [title, stage, owner]);
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM product_features ORDER BY id DESC LIMIT 1'))?.id;
+  const id = insertedId(r, 'product_features');
   await writeAudit(c, actor || 'system', 'create', 'product_features', id, null, { title, stage });
   return { id };
 }

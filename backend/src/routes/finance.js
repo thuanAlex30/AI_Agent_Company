@@ -1,7 +1,7 @@
 const express = require('express');
 const { authenticate, requirePerm, actorId } = require('../common/auth');
 const { ok, fail, AppError } = require('../common/errors');
-const { get, all, run, tx, norm } = require('../common/db');
+const { get, all, run, tx, norm, insertedId } = require('../common/db');
 const { reqStr, reqIntPos, reqCode } = require('../common/validate');
 const { uploadCsv } = require('../common/upload');
 const {
@@ -26,9 +26,23 @@ router.post('/transactions', requirePerm('payments.write'), async (req, res) => 
     const bank_ref = reqCode(req.body, 'bank_ref');
     const amount = reqIntPos(req.body, 'amount');
     const trans_date = reqStr(req.body, 'trans_date', { max: 10 });
-    await run('INSERT INTO transactions(trans_date,amount,content,bank_ref,status) VALUES(?,?,?,?,\'unmatched\') ON CONFLICT(bank_ref) DO NOTHING',
-      [trans_date, amount, req.body.content || null, bank_ref]);
-    return ok(res, { bank_ref });
+    // P1-14 + P2-20: ghi trong transaction + audit.
+    // P2-20: `ON CONFLICT DO NOTHING` khong bao gio cho biet ban ghi co
+    // duoc ghi hay khong -> dem `changes` de bao cao `skipped` chinh xac
+    // (truoc day luon bao imported=1 ke ca khi trung).
+    const out = await tx(async (c) => {
+      const r = await c.run("INSERT INTO transactions(trans_date,amount,content,bank_ref,status) VALUES(?,?,?,?,'unmatched') ON CONFLICT(bank_ref) DO NOTHING",
+        [trans_date, amount, req.body.content || null, bank_ref]);
+      const written = Number(r?.changes || 0) === 1;
+      if (written) {
+        const id = insertedId(r, 'transactions');
+        await setBusinessScope(c, 'transactions', id, 'finance');
+        const { writeAudit } = require('../common/audit');
+        await writeAudit(c, req.user.username, 'create', 'transactions', id, null, { bank_ref, amount, trans_date });
+      }
+      return { bank_ref, imported: written, skipped: written ? 0 : 1 };
+    });
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 router.post('/transactions/import-csv', requirePerm('payments.write'), uploadCsv.single('file'), async (req, res) => {
@@ -36,19 +50,36 @@ router.post('/transactions/import-csv', requirePerm('payments.write'), uploadCsv
     if (!req.file) throw new AppError('VALIDATION', 'Thieu file CSV (field file)', 400);
     const { parse } = require('csv-parse/sync');
     const records = parse(req.file.buffer.toString('utf8'), { columns: true, skip_empty_lines: true, trim: true });
-    let imported = 0, skipped = 0;
-    for (const r of records.slice(0, 1000)) {
-      const bank_ref = String(r.bank_ref || r.ref || '').trim();
-      const amount = Number(String(r.amount || '').replace(/[^\d-]/g, ''));
-      const trans_date = String(r.trans_date || r.date || '').trim().slice(0, 10);
-      if (!bank_ref || !amount || !trans_date) { skipped++; continue; }
-      try {
-        await run('INSERT INTO transactions(trans_date,amount,content,bank_ref,status) VALUES(?,?,?,?,\'unmatched\') ON CONFLICT(bank_ref) DO NOTHING',
-          [trans_date, amount, r.content || r.noi_dung || null, bank_ref]);
-        imported++;
-      } catch { skipped++; }
-    }
-    return ok(res, { imported, skipped, total: records.length });
+    // P1-14: MOT transaction cho CA LO (hoac tx/lô) + audit.
+    // P2-20: dem `imported` theo `changes` (that su ghi moi), `skipped` theo
+    // `duplicate` (trung bank_ref) vs `invalid` (du lieu sai) — 2 nhom rieng.
+    const out = await tx(async (c) => {
+      const { writeAudit } = require('../common/audit');
+      let imported = 0, duplicate = 0, invalid = 0;
+      for (const r of records.slice(0, 1000)) {
+        const bank_ref = String(r.bank_ref || r.ref || '').trim();
+        const amount = Number(String(r.amount || '').replace(/[^\d-]/g, ''));
+        const trans_date = String(r.trans_date || r.date || '').trim().slice(0, 10);
+        if (!bank_ref || !amount || !trans_date) { invalid++; continue; }
+        let res2;
+        try {
+          res2 = await c.run("INSERT INTO transactions(trans_date,amount,content,bank_ref,status) VALUES(?,?,?,?,'unmatched') ON CONFLICT(bank_ref) DO NOTHING",
+            [trans_date, amount, r.content || r.noi_dung || null, bank_ref]);
+        } catch { invalid++; continue; }
+        if (Number(res2?.changes || 0) === 1) {
+          imported++;
+          const id = insertedId(res2, 'transactions');
+          await setBusinessScope(c, 'transactions', id, 'finance');
+          await writeAudit(c, req.user.username, 'create', 'transactions', id, null, { bank_ref, amount, trans_date, source: 'import-csv' });
+        } else {
+          duplicate++;
+        }
+      }
+      const skipped = duplicate + invalid;
+      await writeAudit(c, req.user.username, 'create', 'transactions_import', null, null, { imported, duplicate, invalid, total: records.length });
+      return { imported, skipped, duplicate, invalid, total: records.length };
+    });
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 
@@ -135,21 +166,24 @@ router.post('/expenses', requireScoped('expenses.write'), async (req, res) => {
     const amount = reqIntPos(req.body, 'amount');
     const type = reqStr(req.body, 'type', { enum: ['payable', 'fee', 'salary', 'marketing', 'other'] });
     const { writeAudit } = require('../common/audit');
-    // Phase 4 (GOV-01): ghi du lieu + audit + approval trong CUNG transaction.
+    const gov = require('../modules/governance/approvals');
+    // GOV-01 + P1-6: ghi du lieu + approval + audit trong CUNG transaction.
+    // Cap duyet LUON tinh tu approval-matrix.json (goi gov.requestApproval),
+    // KHONG hardcode nguong.
     const out = await tx(async (c) => {
       const r = await c.run('INSERT INTO expenses(code,type,amount,paid,status,created_by,due_date,note) VALUES(?,?,?,?,?,?,?,?)',
         [code, type, amount, 0, 'open', actorId(req.user), req.body.due_date || null, req.body.note || null]);
-      const id = r.lastInsertRowid || (await c.get('SELECT id FROM expenses WHERE code=?', [code]))?.id;
+      const id = insertedId(r, 'expenses');
       // Phase 3: expenses thuoc phong ban finance.
       await setBusinessScope(c, 'expenses', id, 'finance');
-      // INV-6: nguong duyet LAY TU approval-matrix.json (khong hardcode).
-      const gov = require('../modules/governance/approvals');
-      const level = gov.levelForAmount(amount);
-      await c.run('INSERT INTO approvals(ref_type,ref_id,requester,level,status) VALUES(?,?,?,?,?)',
-        ['expense', id, req.user.id, level, 'pending']);
-      await setBusinessScope(c, 'approvals', id, 'finance');
-      await writeAudit(c, req.user.username, 'create', 'expenses', id, null, { code, amount, level });
-      return { id, code, approval_level: level };
+      const ap = await gov.requestApproval(c, {
+        ref_type: 'expense', ref_id: id,
+        requester: req.user.id, requester_username: req.user.username,
+        note: req.body.note || null,
+      });
+      await setBusinessScope(c, 'approvals', ap.id, 'finance');
+      await writeAudit(c, req.user.username, 'create', 'expenses', id, null, { code, amount, level: ap.level });
+      return { id, code, approval_level: ap.level };
     });
     return ok(res, out);
   } catch (e) { return fail(res, e); }
@@ -180,9 +214,28 @@ router.post('/budgets', requireScoped('budgets.write'), async (req, res) => {
     const dept = reqStr(req.body, 'dept_code');
     // Phase 3: chi tao budget cho phong ban trong scope.
     enforceDept(req.user, dept, 'budget');
-    await run('INSERT INTO budgets(dept_code,month,planned,actual) VALUES(?,?,?,?) ON CONFLICT(dept_code,month) DO NOTHING',
-      [dept, reqStr(req.body, 'month', { max: 7 }), reqIntPos(req.body, 'planned'), 0]);
-    return ok(res, { done: true });
+    // P1-14: tx + audit + report dung `skipped` khi da ton tai.
+    const out = await tx(async (c) => {
+      const r = await c.run('INSERT INTO budgets(dept_code,month,planned,actual) VALUES(?,?,?,?) ON CONFLICT(dept_code,month) DO NOTHING',
+        [dept, reqStr(req.body, 'month', { max: 7 }), reqIntPos(req.body, 'planned'), 0]);
+      const written = Number(r?.changes || 0) === 1;
+      if (written) {
+        const id = insertedId(r, 'budgets');
+        const { writeAudit } = require('../common/audit');
+        await writeAudit(c, req.user.username, 'create', 'budgets', id, null, { dept_code: dept, month: req.body.month, planned: req.body.planned });
+      }
+      return { done: true, imported: written, skipped: written ? 0 : 1 };
+    });
+    return ok(res, out);
+  } catch (e) { return fail(res, e); }
+});
+
+// P1-15: `cashflow()` ton tai trong financeService nhung CHUA co route.
+// Biet them route doc (de verify.js phan anh dung code dang song).
+router.get('/finance/cashflow', requireScoped('finance.read'), async (req, res) => {
+  try {
+    const rows = await tx((conn) => financeService.cashflow(conn));
+    return ok(res, rows);
   } catch (e) { return fail(res, e); }
 });
 

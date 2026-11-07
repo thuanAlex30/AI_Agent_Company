@@ -3,6 +3,7 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const { AsyncLocalStorage } = require('async_hooks');
+const { AppError } = require('./errors');
 require('dotenv').config();
 
 const DIALECT = process.env.PG_HOST ? 'pg' : 'sqlite';
@@ -212,6 +213,22 @@ async function run(sql, params = []) {
     return { changes: r.changes, lastInsertRowid: r.lastInsertRowid };
   });
 }
+
+/**
+ * P1-8 / DB-04: lay ID ban ghi vua tao — KHONG fallback "ORDER BY id DESC LIMIT 1".
+ *
+ * Fallback la nguy hiem: khi 2 request cung tao ban ghi, request A co the lay
+ * ID cua request B => lien ket record sai (audit sai, scope sai, refund sai).
+ * Adapter `run()` da tra `lastInsertRowid` dung o ca 2 dialect => dung thang.
+ * Neu khong co ID => loi thoi truong (fail-fast) thay vi ghi sai lien ket.
+ */
+function insertedId(r, table, label = '') {
+  const id = r && r.lastInsertRowid != null ? Number(r.lastInsertRowid) : null;
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new AppError('INTERNAL', `Khong lay duoc id ban ghi vua tao${label ? ' (' + label + ')' : ''}`, 500);
+  }
+  return id;
+}
 async function tx(fn) {
   if (DIALECT === 'pg') {
     const client = await getPool().connect();
@@ -285,7 +302,7 @@ async function tx(fn) {
 
 // Exports: dat o CUOI file de moi function deu da khai bao (INV-6: mot nguon).
 module.exports = {
-  query, get, all, run, tx, norm,
+  query, get, all, run, tx, norm, insertedId,
   nowVN, todayVN, businessDayVN, sinceVN, nowPlusMinutesISO, nowISO,
   toSqlDateTime, toUtcDateTime, isExpired,
   DIALECT, isUniqueViolation,

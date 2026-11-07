@@ -1,5 +1,6 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
+const { insertedId } = require('../../common/db');
 
 // risk so huu: risks
 async function list(conn) {
@@ -13,7 +14,7 @@ async function create(conn, { title, level = 'medium', owner = null, due_date = 
   if (!title) throw new AppError('VALIDATION', 'Risk can title', 400);
   if (!['low', 'medium', 'high', 'critical'].includes(level)) throw new AppError('VALIDATION', 'level khong hop le', 400);
   const r = await c.run("INSERT INTO risks(title,level,owner,status,due_date) VALUES(?,?,?,'open',?)", [title, level, owner, due_date]);
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM risks ORDER BY id DESC LIMIT 1'))?.id;
+  const id = insertedId(r, 'risks');
   await writeAudit(c, actor || 'system', 'create', 'risks', id, null, { title, level });
   return { id };
 }

@@ -1,7 +1,7 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
 const { setBusinessScope, resolveResourceDept } = require('../../common/scope');
-const { norm, todayVN, sinceVN, businessDayVN } = require('../../common/db');
+const { norm, todayVN, sinceVN, businessDayVN, insertedId } = require('../../common/db');
 
 // NOTE: module nay so huu debts/payments/expenses/transactions/reminder_log/budgets.
 // Cap nhat trang thai don goi qua salesService.setOrderPaid (khong UPDATE truc tiep bang cua sales).
@@ -33,7 +33,7 @@ async function createReceivable(conn, { customer_id, order_id = null, amount, du
       'INSERT INTO debts(customer_id,order_id,type,amount,paid,due_date,status,note,created_by) VALUES(?,?,?,?,?,?,\'open\',?,?)',
       [customer_id, order_id, 'receivable', amount, 0, due_date || due7(), note, created_by]
     );
-    const id = r.lastInsertRowid || (await c.get('SELECT id FROM debts WHERE customer_id=? AND order_id ' + (order_id ? '=?' : 'IS NULL') + ' ORDER BY id DESC LIMIT 1', order_id ? [customer_id, order_id] : [customer_id]))?.id;
+    const id = insertedId(r, 'debts');
     // Phase 3: cong no thuoc phong ban cua don (fallback finance).
     const debtDept = await resolveResourceDept(c, 'debts', { orderId: order_id });
     await setBusinessScope(c, 'debts', id, debtDept);
@@ -49,7 +49,7 @@ async function createPayable(conn, { order_id = null, amount, due_date = null, c
       'INSERT INTO debts(customer_id,order_id,type,amount,paid,due_date,status,note,created_by) VALUES(NULL,?,\'payable\',?,0,?,\'open\',?,?)',
       [order_id, amount, due_date || due7(), note, created_by]
     );
-    const id = r.lastInsertRowid || (await c.get('SELECT id FROM debts WHERE type=\'payable\' ORDER BY id DESC LIMIT 1'))?.id;
+    const id = insertedId(r, 'debts');
     // Phase 3: payable thuoc phong ban finance.
     await setBusinessScope(c, 'debts', id, 'finance');
     await writeAudit(c, actor || 'system', 'create', 'debts', id, null, { order_id, amount });
@@ -102,7 +102,7 @@ async function recordPayment(conn, { debt_id = null, expense_id = null, order_id
         }
         throw e;
       }
-    const pid = r.lastInsertRowid || (await c.get('SELECT id FROM payments WHERE debt_id=? ORDER BY id DESC LIMIT 1', [debt_id]))?.id;
+    const pid = insertedId(r, 'payments');
     // Phase 3: payment thuoc phong ban finance.
     await setBusinessScope(c, 'payments', pid, 'finance');
     const status = newPaid >= Number(d.amount) ? 'done' : d.status;
@@ -142,7 +142,7 @@ async function recordPayment(conn, { debt_id = null, expense_id = null, order_id
     }
     throw e;
   }
-  const pid = r.lastInsertRowid || (await c.get('SELECT id FROM payments WHERE expense_id=? ORDER BY id DESC LIMIT 1', [expense_id]))?.id;
+  const pid = insertedId(r, 'payments');
   await setBusinessScope(c, 'payments', pid, 'finance');
   const up = await c.run("UPDATE expenses SET paid=?, status=? WHERE id=? AND paid=?", [newPaid, newPaid >= Number(e.amount) ? 'done' : 'open', expense_id, Number(e.paid)]);
   if (Number(up?.changes || 0) === 0) throw new AppError('CONFLICT', 'Chi phi vua bi cap nhat boi giao dich khac — thu lai', 409);

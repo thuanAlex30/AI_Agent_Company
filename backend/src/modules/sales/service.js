@@ -1,13 +1,73 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
 const { setBusinessScope, resolveResourceDept } = require('../../common/scope');
+const { insertedId } = require('../../common/db');
 
-const ORDER_FLOW = ['draft', 'pending_approval', 'pending', 'approved', 'in_progress', 'done', 'paid', 'partial', 'cancelled', 'refunded'];
+// INV-8 (P1-21): ORDER_FLOW la bang transition (khong phai mang ke).
+// Nguon: docs/contract/state-machines.md. Chuyen sai => VALIDATION 400,
+// KHONG duoc update lech trang thai.
+const ORDER_FLOW = {
+  draft:             ['pending_approval', 'pending', 'cancelled'],
+  pending_approval: ['pending', 'cancelled', 'rejected'],
+  pending:           ['approved', 'partial', 'cancelled'],
+  approved:          ['in_progress', 'partial', 'cancelled'],
+  in_progress:       ['done', 'partial', 'cancelled'],
+  done:              ['paid', 'partial'],
+  partial:           ['paid', 'partial', 'refunded'],
+  paid:              ['refunded'],
+  cancelled:         [],
+  refunded:          [],
+};
+
+/** Chuyen trang thai don — nem VALIDATION 400 neu khong hop le. */
+function assertOrderTransition(from, to) {
+  const f = String(from || '').trim();
+  const t = String(to || '').trim();
+  if (f === t) return; // idempotent: giu nguyen trang thai
+  if (!(ORDER_FLOW[f] || []).includes(t)) {
+    throw new AppError('VALIDATION', `Chuyen trang thai don ${f}->${t} khong hop le`, 400);
+  }
+}
+
+/**
+ * INV-8: duong di trang thai hop le tu `from` -> `to`.
+ * Tra null neu khong ton tai duong hop le.
+ *
+ * Nguon: docs/contract/state-machines.md —
+ *   "pending|approved|in_progress -> partial -> paid"
+ * => thanh toan day du khi don chua qua `done` van phai di qua `partial`
+ *    (KHONG bo qua buoc giao hang bang cach nhay thang in_progress -> paid).
+ */
+function orderTransitionPath(from, to) {
+  const f = String(from || '').trim();
+  const t = String(to || '').trim();
+  if (f === t) return [];
+  if ((ORDER_FLOW[f] || []).includes(t)) return [t];
+  if (t === 'paid'
+    && ['pending', 'approved', 'in_progress'].includes(f)
+    && (ORDER_FLOW[f] || []).includes('partial')
+    && (ORDER_FLOW.partial || []).includes('paid')) {
+    return ['partial', 'paid'];
+  }
+  return null;
+}
+
+/** Danh sach trang thai hop le (cho UI/verify). */
+const ORDER_STATES = Object.keys(ORDER_FLOW);
 
 async function withTx(fn, conn) {
   const db = require('../../common/db');
   if (conn && typeof conn.run === 'function') return fn(conn);
   return db.tx(fn);
+}
+
+// TX-03/P1-9: khoa dong order de chong lost-update (FOR UPDATE tren PG).
+async function lockOrder(c, orderId) {
+  if (typeof c.lock === 'function') {
+    const row = await c.lock('SELECT * FROM orders WHERE id=?', [orderId]);
+    if (row) return row;
+  }
+  return c.get('SELECT * FROM orders WHERE id=?', [orderId]);
 }
 
 // TX-02: doc ton kho co khoa dong hang theo SKU (chi tiet: supply/service.js).
@@ -87,7 +147,7 @@ async function createOrder(conn, { code, customer_id, items, employee_id = null,
       }
       throw e;
     }
-    const orderId = r.lastInsertRowid || (await c.get('SELECT id FROM orders WHERE code=?', [code]))?.id;
+    const orderId = insertedId(r, 'orders');
     // Phase 3 (P0-4): gan phong ban cho don (de scope list + IDOR check hoat dong).
     const orderDept = await resolveResourceDept(c, 'orders', { ownerEmployeeId: employee_id });
     await setBusinessScope(c, 'orders', orderId, orderDept, employee_id);
@@ -112,7 +172,9 @@ async function createOrder(conn, { code, customer_id, items, employee_id = null,
 
 async function setOrderPaid(conn, orderId, actor) {
   return withTx(async (c) => {
-    const o = await c.get('SELECT * FROM orders WHERE id=?', [orderId]);
+    // P1-9: khoa dong order (FOR UPDATE tren PG) — 2 payment song song
+    // cung 1 don se phai cho nhau, khong con "doc status roi ghi lech".
+    const o = await lockOrder(c, orderId);
     if (!o) throw new AppError('NOT_FOUND', 'Khong tim thay don', 404);
     if (['cancelled', 'refunded', 'draft'].includes(o.status)) return { id: orderId, status: o.status };
     const s = await c.get('SELECT COALESCE(SUM(amount),0) sum FROM payments WHERE order_id=?', [orderId]);
@@ -121,8 +183,22 @@ async function setOrderPaid(conn, orderId, actor) {
     if (paidSum >= Number(o.amount) && Number(o.amount) > 0) ns = 'paid';
     else if (paidSum > 0) ns = 'partial';
     if (ns !== o.status) {
-      await c.run('UPDATE orders SET status=? WHERE id=?', [ns, orderId]);
-      await writeAudit(c, actor || 'system', 'update', 'orders', orderId, { status: o.status }, { status: ns });
+      // INV-8: chi chuyen trang thai khi duong di hop le (nhung don chua
+      // giao xong van di qua `partial` truocc `paid`).
+      const oldStatus = o.status;
+      const path = orderTransitionPath(oldStatus, ns);
+      if (!path) {
+        throw new AppError('VALIDATION', `Chuyen trang thai don ${oldStatus}->${ns} khong hop le`, 400);
+      }
+      let cur = oldStatus;
+      for (const step of path) {
+        const up = await c.run('UPDATE orders SET status=? WHERE id=? AND status=?', [step, orderId, cur]);
+        if (Number(up?.changes || 0) !== 1) {
+          throw new AppError('CONFLICT', 'Don vua bi cap nhat boi giao dich khac — thu lai', 409);
+        }
+        cur = step;
+      }
+      await writeAudit(c, actor || 'system', 'update', 'orders', orderId, { status: oldStatus }, { status: ns });
     }
     return { id: orderId, status: ns, paidSum };
   }, conn);
@@ -130,20 +206,23 @@ async function setOrderPaid(conn, orderId, actor) {
 
 async function cancelOrder(conn, orderId, actor, actor_id = null) {
   return withTx(async (c) => {
-    const o = await c.get('SELECT * FROM orders WHERE id=?', [orderId]);
+    // P1-9: khoa dong order truoc khi kiem tra + ghi (chong 2 cancel song song).
+    const o = await lockOrder(c, orderId);
     if (!o) throw new AppError('NOT_FOUND', 'Khong tim thay don', 404);
     const pay = await c.get('SELECT COUNT(*) c FROM payments WHERE order_id=?', [orderId]);
     if (Number(pay?.c || 0) > 0) throw new AppError('VALIDATION', 'Don da co payment — phai refund, khong duoc cancel', 400);
-    if (!['draft', 'pending_approval', 'pending', 'approved', 'in_progress'].includes(o.status)) {
-      throw new AppError('VALIDATION', `Trang thai ${o.status} khong duoc cancel`, 400);
-    }
+    // INV-8: cancel chi hop le tu cac trang thai duoc phep (dang ky trong ORDER_FLOW).
+    assertOrderTransition(o.status, 'cancelled');
     const items = await c.query('SELECT * FROM order_items WHERE order_id=?', [orderId]);
     const supplyService = require('../supply/service');
     const financeService = require('../finance/service');
     for (const it of items) {
       await supplyService.moveStock(c, { sku: it.product_sku, type: 'in', qty: Math.abs(it.qty), ref_code: `CANCEL-${o.code}`, created_by: actor_id, actor });
     }
-    await c.run('UPDATE orders SET status=? WHERE id=?', ['cancelled', orderId]);
+    const up = await c.run('UPDATE orders SET status=? WHERE id=? AND status=?', ['cancelled', orderId, o.status]);
+    if (Number(up?.changes || 0) !== 1) {
+      throw new AppError('CONFLICT', 'Don vua bi cap nhat boi giao dich khac — thu lai', 409);
+    }
     await financeService.markDebtCancelled(c, orderId, actor);
     await writeAudit(c, actor || 'system', 'update', 'orders', orderId, { status: o.status }, { status: 'cancelled' });
     return { id: orderId, status: 'cancelled' };
@@ -152,9 +231,11 @@ async function cancelOrder(conn, orderId, actor, actor_id = null) {
 
 async function refundOrder(conn, orderId, actor, actor_id = null) {
   return withTx(async (c) => {
-    const o = await c.get('SELECT * FROM orders WHERE id=?', [orderId]);
+    const o = await lockOrder(c, orderId);
     if (!o) throw new AppError('NOT_FOUND', 'Khong tim thay don', 404);
     if (!['paid', 'partial'].includes(o.status)) throw new AppError('VALIDATION', 'Chi refund don paid/partial', 400);
+    // INV-8: refund chi xuat tu paid/partial.
+    assertOrderTransition(o.status, 'refunded');
     const financeService = require('../finance/service');
     const supplyService = require('../supply/service');
     const debts = await c.query('SELECT * FROM debts WHERE order_id=? AND type=\'receivable\'', [orderId]);
@@ -167,7 +248,10 @@ async function refundOrder(conn, orderId, actor, actor_id = null) {
     for (const it of items) {
       await supplyService.moveStock(c, { sku: it.product_sku, type: 'in', qty: Math.abs(it.qty), ref_code: `REFUND-${o.code}`, created_by: actor_id, actor });
     }
-    await c.run('UPDATE orders SET status=? WHERE id=?', ['refunded', orderId]);
+    const up = await c.run('UPDATE orders SET status=? WHERE id=? AND status=?', ['refunded', orderId, o.status]);
+    if (Number(up?.changes || 0) !== 1) {
+      throw new AppError('CONFLICT', 'Don vua bi cap nhat boi giao dich khac — thu lai', 409);
+    }
     await financeService.markDebtCancelled(c, orderId, actor);
     await writeAudit(c, actor || 'system', 'update', 'orders', orderId, { status: o.status }, { status: 'refunded' });
     return { id: orderId, status: 'refunded' };
@@ -185,7 +269,7 @@ async function convertLead(conn, leadId, actor) {
     if (exist) customerId = exist.id;
     else {
       const r = await c.run('INSERT INTO customers(code,name,phone,type,owner_employee_id) VALUES(?,?,?,?,?)', [code, lead.name, lead.phone, 'retail', lead.owner_employee_id]);
-      customerId = r.lastInsertRowid || (await c.get('SELECT id FROM customers WHERE code=?', [code]))?.id;
+      customerId = insertedId(r, 'customers');
       // Phase 3: gan phong ban cho KH vua tao.
       const custDept = await resolveResourceDept(c, 'customers', { ownerEmployeeId: lead.owner_employee_id });
       await setBusinessScope(c, 'customers', customerId, custDept, lead.owner_employee_id);
@@ -196,4 +280,7 @@ async function convertLead(conn, leadId, actor) {
   }, conn);
 }
 
-module.exports = { createOrder, setOrderPaid, cancelOrder, refundOrder, convertLead, ORDER_FLOW };
+module.exports = {
+  createOrder, setOrderPaid, cancelOrder, refundOrder, convertLead,
+  ORDER_FLOW, ORDER_STATES, assertOrderTransition, orderTransitionPath,
+};
