@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 require('./setup');
 const { get, run } = require('../src/common/db');
 const supplyService = require('../src/modules/supply/service');
+const { ensureStockAll } = require('./helpers/stock');
 
 const S = Date.now();
 let poId;
@@ -10,6 +11,12 @@ async function stockOf(sku) {
   const r = await get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [sku]);
   return Number(r.s);
 }
+
+// BUG (TEST-ISO-01): ton kho bi tieu het giua cac file test (cung DB) =>
+// p2p2 fail "Kho khong du ..." tren PostgreSQL.
+test.before(async () => {
+  await ensureStockAll(['CF-SUA-01', 'BANH-01', 'TRA-DAO-01'], 500);
+});
 
 test('p2p1: receivePO chua duyet bi chan APPROVAL_REQUIRED', async () => {
   const sup = await get("SELECT * FROM suppliers WHERE code='NCC01'");

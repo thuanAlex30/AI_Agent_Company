@@ -40,8 +40,11 @@ const mig5 = read(path.join(ROOT, 'src/db/migrations/005_dept_scope.sql'));
 const migPg5 = read(path.join(ROOT, 'src/db/migrations/005_dept_scope.postgres.sql'));
 const mig6 = read(path.join(ROOT, 'src/db/migrations/006_backfill_dept_scope.sql'));
 const migPg6 = read(path.join(ROOT, 'src/db/migrations/006_backfill_dept_scope.postgres.sql'));
-const migAll = mig + '\n' + mig2 + '\n' + mig3 + '\n' + mig4 + '\n' + mig5 + '\n' + mig6;
-const migPgAll = migPg + '\n' + migPg2 + '\n' + migPg3 + '\n' + migPg4 + '\n' + migPg5 + '\n' + migPg6;
+// Migration 007: qa_checks.ref_id -> TEXT (de tham chieu san pham theo SKU).
+const mig7 = read(path.join(ROOT, 'src/db/migrations/007_qa_ref_id_text.sql'));
+const migPg7 = read(path.join(ROOT, 'src/db/migrations/007_qa_ref_id_text.postgres.sql'));
+const migAll = mig + '\n' + mig2 + '\n' + mig3 + '\n' + mig4 + '\n' + mig5 + '\n' + mig6 + '\n' + mig7;
+const migPgAll = migPg + '\n' + migPg2 + '\n' + migPg3 + '\n' + migPg4 + '\n' + migPg5 + '\n' + migPg6 + '\n' + migPg7;
 if (!mig) ok(false, 'thieu 001_init.sql');
 else {
   for (const t of manifest.tables) ok(new RegExp('CREATE TABLE[^;]*\\b' + t + '\\b', 'i').test(migAll), 'migration co bang ' + t);
@@ -1260,6 +1263,85 @@ function mutationRoutes(src) {
   for (const f of testFiles) {
     ok(csv.includes(f), 'Phase 7: traceability.csv tro toi ' + f);
   }
+})();
+
+// ===========================================================================
+// 19. DIALECT / DATA-INTEGRITY REGRESSION (v11.2)
+//     Verify phai bat loi da XAC NHAN tren CI run 42340162280 (job
+//     `backend-postgres`) va loi phai sinh tu cac fix v11.2.
+//     Khong "xanh gia": moi assert doc SOURCE THAT.
+// ===========================================================================
+(function dialectRegressionGuard() {
+  const dbSrc = read(path.join(ROOT, 'src/common/db.js'));
+
+  // (a) PG-DB-01: KHONG them "RETURNING id" vao bang khong co cot `id`.
+  ok(/NO_ID_TABLES/.test(dbSrc), 'PG-DB-01: db.js co danh sach bang khong co cot id (NO_ID_TABLES)');
+  for (const t of ['products', 'departments', 'resource_dept', 'schema_migrations']) {
+    ok(new RegExp("['\"]" + t + "['\"]").test(dbSrc),
+      'PG-DB-01: NO_ID_TABLES chua bang khong co cot id: ' + t);
+  }
+  ok(/NO_ID_TABLES\.has\(t\)/.test(dbSrc), 'PG-DB-01: withReturning bo qua RETURNING id cho bang NO_ID_TABLES');
+
+  // (b) PG-DB-09: `ON CONFLICT DO NOTHING` VAN phai co "RETURNING id".
+  //     (PG ho tro: 1 dong khi insert moi, 0 dong khi conflict.)
+  const wr = dbSrc.match(/function withReturning\(sql\)\s*\{[\s\S]*?\n\}/);
+  ok(wr && !/do\s+nothing[\s\S]*?return s;/.test(wr[0].replace(/\/\/[^\n]*/g, '')),
+    'PG-DB-09: withReturning KHONG bo qua RETURNING id cho ON CONFLICT DO NOTHING');
+
+  // (c) PG-DB-04: chuan hoa tham so cho cot BIGINT "dinh danh nguoi".
+  ok(/NUMERIC_ID_COLUMNS/.test(dbSrc), 'PG-DB-04: db.js co danh sach cot BIGINT can chuan hoa (NUMERIC_ID_COLUMNS)');
+  ok(/normalizeParamsForSql/.test(dbSrc), 'PG-DB-04: db.js chuan hoa tham so theo cot dich');
+  ok(/normalizeParamsForSql/.test(dbSrc.match(/async function run\([\s\S]*?\n\}/)[0]) ||
+     /normalizeParamsForSql/.test(dbSrc.match(/async function tx\([\s\S]*?\n\}\n/)[0]),
+    'PG-DB-04: normalizeParamsForSql duoc goi trong run()/tx()');
+
+  // (d) PG-DB-07: tra cuu "id HOAC code" khong bind chuoi vao cot BIGINT.
+  ok(/findByIdOrCode/.test(dbSrc), 'PG-DB-07: db.js co helper findByIdOrCode (id HOAC code)');
+  const catalog = read(path.join(ROOT, 'src/public/catalog.js'));
+  const orders = read(path.join(ROOT, 'src/public/orders.js'));
+  ok(!/id=\?\s+OR\s+code=\?/i.test(catalog) && !/code=\?\s+OR\s+id=\?/i.test(catalog),
+    'PG-DB-07: catalog.js KHONG con so sanh "id OR code" truc tiep (dung findByIdOrCode)');
+  ok(!/code=\?\s+OR\s+id=\?/i.test(orders), 'PG-DB-07: public/orders.js KHONG con so sanh "code OR id" truc tiep');
+
+  // (e) PG-DB-08 / DATA-08: `qa_checks.ref_id` phai la TEXT (chua ca so va ma).
+  const mig7 = read(path.join(ROOT, 'src/db/migrations/007_qa_ref_id_text.sql'));
+  const migPg7 = read(path.join(ROOT, 'src/db/migrations/007_qa_ref_id_text.postgres.sql'));
+  ok(/ref_id\s+TEXT\s+NOT\s+NULL/i.test(mig7), 'PG-DB-08: migration 007 SQLite doi qa_checks.ref_id sang TEXT');
+  ok(/ALTER\s+COLUMN\s+ref_id\s+TYPE\s+TEXT/i.test(migPg7), 'PG-DB-08: migration 007 PG doi qa_checks.ref_id sang TEXT');
+  const qaSvc = read(path.join(ROOT, 'src/modules/qa/service.js'));
+  ok(!/SELECT id FROM products WHERE id=/i.test(qaSvc), 'PG-DB-08: qa/service.js KHONG truy van products.id (bang products khoa SKU)');
+  ok(/sku/.test(qaSvc), 'PG-DB-08: qa/service.js kiem tra ton tai san pham theo sku');
+
+  // (f) PG-TYPE-01: BIGINT phai tra Number (dong nhat 2 dialect).
+  ok(/getTypeParser/.test(dbSrc), 'PG-TYPE-01: db.js gan type parser cho PG (BIGINT -> Number)');
+
+  // (g) PG-DB-06: khong dung SQL trigger SQLite-only trong TEST.
+  const testDir = path.join(ROOT, 'tests');
+  const trigHelper = fs.existsSync(path.join(testDir, 'helpers', 'triggers.js'))
+    ? read(path.join(testDir, 'helpers', 'triggers.js')) : '';
+  ok(trigHelper.length > 0, 'PG-DB-06: co helper trigger dialect-aware (tests/helpers/triggers.js)');
+  let sqliteOnlyTrig = 0;
+  for (const f of fs.readdirSync(testDir).filter((x) => x.endsWith('.test.js'))) {
+    const src = read(path.join(testDir, f));
+    if (/DROP\s+TRIGGER\s+IF\s+EXISTS\s+\w+\s*(;|'|")/i.test(src)) sqliteOnlyTrig++;
+    if (/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS/i.test(src)) sqliteOnlyTrig++;
+  }
+  ok(sqliteOnlyTrig === 0, 'PG-DB-06: khong con SQL trigger SQLite-only trong test (' + sqliteOnlyTrig + '');
+
+  // (h) TEST-ISO-01: test phai dam bao ton kho (khong phu thuoc thu tu file).
+  const stockHelper = fs.existsSync(path.join(testDir, 'helpers', 'stock.js'))
+    ? read(path.join(testDir, 'helpers', 'stock.js')) : '';
+  ok(stockHelper.length > 0, 'TEST-ISO-01: co helper ton kho (tests/helpers/stock.js)');
+  let noStockGuard = [];
+  for (const f of ['phase4.test.js', 'order-stock-debt.test.js', 'payments.test.js', 'p2p.test.js', 'approval.test.js']) {
+    const src = read(path.join(testDir, f));
+    if (!/ensureStock/.test(src)) noStockGuard.push(f);
+  }
+  ok(noStockGuard.length === 0, 'TEST-ISO-01: moi file test tao don phai dam bao ton kho (' + noStockGuard.join(', ') + ')');
+
+  // (i) Regression suite phai ton tai (biet loi quay lai).
+  ok(fs.existsSync(path.join(testDir, 'dialect-regression.test.js')),
+    'REGRESSION: ton tai tests/dialect-regression.test.js (bat loi dialect quay lai)');
 })();
 
 console.log(fail === 0 ? '\nVERIFY: ALL PASS (' + assertCount + ' asserts)' : '\nVERIFY: ' + fail + ' FAIL (' + assertCount + ' asserts)');

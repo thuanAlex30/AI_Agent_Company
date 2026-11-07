@@ -137,6 +137,31 @@ function getPool() {
       host: process.env.PG_HOST, port: process.env.PG_PORT || 5432,
       user: process.env.PG_USER, password: process.env.PG_PASSWORD,
       database: process.env.PG_DB,
+      // BUG (PG-TYPE-01): driver `pg` mac dinh tra BIGINT/NUMERIC/INT4/INT8
+      // dang CHUOI (de khong lam mat do chinh xac so lon). SQLite (better-sqlite3)
+      // tra dang NUMBER. => cung mot cot (`payments.id`) co 2 kieu khac nhau
+      // giua 2 dialect:
+      //   - `insertedId()` tra Number (tu `RETURNING id` -> driver parse)
+      //   - `SELECT id FROM payments ...` (dedup path) tra String '22'
+      // => API tra `id` khac kieu giua lan moi vay lan retry -> so sanh
+      //    `r1.id === r2.id` that (idempotency client sai).
+    //
+    // FIX: gan type parser de INT4/INT8/NUMERIC/FLOAT8/BOOL tra ve Number /
+    // Boolean — giong het SQLite. (Khong dung `pg.types.setTypeParser` global
+    // de khong lam anh huong module khac trong process.)
+      types: {
+        getTypeParser: (oid, format) => {
+          // 20=int8, 21=int2, 23=int4, 1700=numeric, 700=float4, 701=float8
+          if ([20, 21, 23, 1700, 700, 701].includes(oid)) {
+            return (v) => (v === null ? null : Number(v));
+          }
+          // 16=bool
+          if (oid === 16) {
+            return (v) => (v === null ? null : v === 't' || v === 'true' || v === true);
+          }
+          return require('pg').types.getTypeParser(oid, format);
+        },
+      },
     });
   }
   return pgPool;
@@ -340,24 +365,24 @@ function normalizeParamsForSql(sql, params) {
   return out;
 }
 
-/** Lay ten bang dich cua cau lenh INSERT/UPDATE/DELETE. */
-function targetTable(sql) {
-  const s = String(sql).trim();
-  let m = /^\s*insert\s+into\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i.exec(s);
-  if (m) return m[1].toLowerCase();
-  m = /^\s*update\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i.exec(s);
-  if (m) return m[1].toLowerCase();
-  m = /^\s*delete\s+from\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i.exec(s);
-  if (m) return m[1].toLowerCase();
-  return null;
-}
-
 function withReturning(sql) {
   const s = String(sql).trim();
   if (/\breturning\b/i.test(s)) return s;
   if (!/^\s*(insert|update|delete)\b/i.test(s)) return s;
-  // INSERT ... ON CONFLICT DO NOTHING: khong co RETURNING (PG loi) -> bo qua.
-  if (/\bon\s+conflict\b[\s\S]*\bdo\s+nothing\b/i.test(s)) return s;
+  // BUG (PG-DB-09): truoc day bo qua "RETURNING id" cho
+  //   `INSERT ... ON CONFLICT DO NOTHING` (do coi nhu PG khong ho tro).
+  //   Sai! PG HO TRO `ON CONFLICT DO NOTHING RETURNING id`:
+  //     - insert moi       -> tra 1 dong (id)
+  //     - conflict (trung) -> tra 0 dong, `changes` = 0
+  //   He qua bo qua RETURNING:
+  //     - SQLite: `lastInsertRowid` van co => `insertedId()` ra so => test PASS
+  //     - PostgreSQL: `r.rows[0]?.id` = undefined => `insertedId()` nem
+  //       "Khong lay duoc id ban ghi vua tao" (500) => import-csv FAIL (p408).
+  //   => GIU "RETURNING id" cho ca 2 trường hợp (DO NOTHING / DO UPDATE).
+  //
+  // INSERT ... ON CONFLICT DO UPDATE: RETURNING id luon tra 1 dong (dong da update)
+  // -> dung de lay id sau upsert.
+  //
   // Bang khong co cot `id` -> KHONG duoc them RETURNING id (PG se loi).
   const t = targetTable(s);
   if (t && NO_ID_TABLES.has(t)) return s;
@@ -381,13 +406,7 @@ async function run(sql, params = []) {
   if (DIALECT === 'pg') {
     let i = 0;
     const pgSql = withReturning(sql).replace(/\?/g, () => '$' + (++i));
-    let r;
-    try {
-      r = await getPool().query(pgSql, p);
-    } catch (e) {
-      e.pgSql = pgSql; e.pgParams = p;
-      throw e;
-    }
+    const r = await getPool().query(pgSql, p);
     return { changes: r.rowCount, lastInsertRowid: r.rows[0]?.id };
   }
   return withSqlite((db) => {
@@ -410,6 +429,60 @@ function insertedId(r, table, label = '') {
     throw new AppError('INTERNAL', `Khong lay duoc id ban ghi vua tao${label ? ' (' + label + ')' : ''}`, 500);
   }
   return id;
+}
+
+// ---------------------------------------------------------------------------
+// BUG (PG-DB-07): truy van "id HOAC code" voi cot `id` kieu BIGINT.
+//
+//   `SELECT * FROM services WHERE (code=? OR id=?)` voi `?` = 'DV-TEABREAK'
+//   - SQLite: khong rang buoc kieu -> tra 0 dong (im lang, sai)
+//   - PostgreSQL: `22P02 invalid input syntax for type bigint: "DV-TEABREAK"`
+//     => 500 cho moi request lookup dich vu theo ma (GET /services/:id,
+//        POST /public/service-requests) => storefront P2E FAIL tren PG.
+//
+// FIX: tach thanh 2 nhanh — chi so sanh `id` khi gia tri THAT LA SO.
+// Voi gia tri chuoi, chi so sanh `code`.
+// ---------------------------------------------------------------------------
+
+/** Tra ve gia tri so hop le neu `v` la so nguyen duong, nguoc lai null. */
+function asNumericId(v) {
+  if (typeof v === 'number') return Number.isInteger(v) && v > 0 ? v : null;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (!/^\d+$/.test(t)) return null;
+    const n = Number(t);
+    return n > 0 ? n : null;
+  }
+  return null;
+}
+
+/**
+ * Tim 1 ban ghi theo `id` (so) HOAC `code` (chuoi) — an toan tren ca 2 dialect.
+ * @param {object} dbOrConn  db hoac conn (tx)
+ * @param {string} table      ten bang
+ * @param {string} cols       danh sach cot can lay, mac dinh '*'
+ * @param {string} idCol     cot id (BIGINT), mac dinh 'id'
+ * @param {string} codeCol   cot code (TEXT), mac dinh 'code'
+ * @param {*} value          gia tri tra ve tu client (co the la so HOAC chuoi)
+ */
+async function findByIdOrCode(dbOrConn, table, value, opts = {}) {
+  const cols = opts.cols || '*';
+  const idCol = opts.idCol || 'id';
+  const codeCol = opts.codeCol || 'code';
+  const numId = asNumericId(value);
+  const raw = value == null ? null : String(value).trim();
+  if (numId != null) {
+    const byId = await dbOrConn.get(
+      `SELECT ${cols} FROM ${table} WHERE ${idCol}=?`, [numId]
+    );
+    if (byId) return byId;
+  }
+  if (raw) {
+    return await dbOrConn.get(
+      `SELECT ${cols} FROM ${table} WHERE ${codeCol}=?`, [raw]
+    );
+  }
+  return null;
 }
 async function tx(fn) {
   if (DIALECT === 'pg') {
@@ -488,6 +561,8 @@ module.exports = {
   nowVN, todayVN, businessDayVN, sinceVN, nowPlusMinutesISO, nowISO,
   toSqlDateTime, toUtcDateTime, isExpired,
   DIALECT, isUniqueViolation,
+  // PG-DB-07: tra cuu "id HOAC code" an toan tren ca 2 dialect.
+  findByIdOrCode, asNumericId,
   // DB-04-NORM / PG-DB-01: expose de test + verify kiem tra truc tiep.
   withReturning, targetTable, normalizeParamsForSql, normalizeIdParam,
   NUMERIC_ID_COLUMNS, NO_ID_TABLES,

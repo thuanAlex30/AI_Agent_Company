@@ -6,31 +6,34 @@ const crypto = require('crypto');
 const request = require('supertest');
 const app = require('../src/server');
 const { get, run, query } = require('../src/common/db');
+const { createAppendOnlyTrigger, dropAppendOnlyTrigger } = require('./helpers/triggers');
+const { ensureStockAll } = require('./helpers/stock');
 
 // P2/P3: checkout storefront -> tra cuu 2 yeu to -> webhook VietQR
 const PHONE = '0909991001';
 const EMAIL = 'p2p3test@example.com';
 
 async function ensureStock() {
-  await run('DROP TRIGGER IF EXISTS trg_no_delete_stock');
-  await run('DROP TRIGGER IF EXISTS trg_no_update_stock');
-  await run('DROP TRIGGER IF EXISTS trg_no_delete_payments');
-  await run('DROP TRIGGER IF EXISTS trg_no_update_payments');
-  const supplyService = require('../src/modules/supply/service');
-  for (const sku of ['CF-SUA-01', 'BANH-01', 'TRA-DAO-01']) {
-    const on = Number((await get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [sku]))?.s || 0);
-    if (on < 500) {
-      try { await supplyService.moveStock(null, { sku, type: 'in', qty: 500, ref_code: 'P2P3-SEED', created_by: 'test' }); } catch {}
-    }
-  }
-  await run("CREATE TRIGGER IF NOT EXISTS trg_no_update_payments BEFORE UPDATE ON payments BEGIN SELECT RAISE(ABORT,'noupd'); END");
-  await run("CREATE TRIGGER IF NOT EXISTS trg_no_delete_payments BEFORE DELETE ON payments BEGIN SELECT RAISE(ABORT,'nodel'); END");
-  await run("CREATE TRIGGER IF NOT EXISTS trg_no_update_stock BEFORE UPDATE ON stock_moves BEGIN SELECT RAISE(ABORT,'noupd'); END");
-  await run("CREATE TRIGGER IF NOT EXISTS trg_no_delete_stock BEFORE DELETE ON stock_moves BEGIN SELECT RAISE(ABORT,'nodel'); END");
+  // BUG (PG-DB-06): SQL trigger o day la SQLite-only:
+  //   `DROP TRIGGER IF EXISTS x` (PG can `ON <table>`) + `CREATE TRIGGER IF NOT
+  //   EXISTS ... BEGIN ... END` (PG khong ho tro) => ERROR 42601 tren PG.
+  // => dung helper dialect-aware.
+  await dropAppendOnlyTrigger('stock_moves');
+  await dropAppendOnlyTrigger('payments');
+  await ensureStockAll(['CF-SUA-01', 'BANH-01', 'TRA-DAO-01'], 500);
+  await createAppendOnlyTrigger('payments');
+  await createAppendOnlyTrigger('stock_moves');
 }
 
 let ORDER = null;
 let LOOKUP_TOKEN = null;
+
+// BUG (TEST-ISO-02): trigger append-only la TRANG THAI CUA DB. File test khac
+// co the da drop trigger => khoi phuc truoc moi test (khong thi CHECK bi bo qua).
+test.before(async () => {
+  await createAppendOnlyTrigger('payments');
+  await createAppendOnlyTrigger('stock_moves');
+});
 
 test('p2a: checkout don thuong (gia server, khong tin client)', async () => {
   await ensureStock();

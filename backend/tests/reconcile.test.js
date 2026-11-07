@@ -7,6 +7,7 @@ const request = require('supertest');
 const app = require('../src/server');
 const { get, run, query } = require('../src/common/db');
 const financeService = require('../src/modules/finance/service');
+const { createAppendOnlyTrigger, dropAppendOnlyTrigger } = require('./helpers/triggers');
 
 // 8 khoan doi soat + DHR09 (cung tien khac ma, khong co giao dich) + cap DHR10A/B (hoa diem -> review)
 const SPECS = [
@@ -25,10 +26,12 @@ const SPECS = [
 
 async function cleanup() {
   // Bang append-only (payments/stock_moves) chan DELETE -> ha trigger tam de don test
-  await run('DROP TRIGGER IF EXISTS trg_no_delete_payments');
-  await run('DROP TRIGGER IF EXISTS trg_no_update_payments');
-  await run('DROP TRIGGER IF EXISTS trg_no_delete_stock');
-  await run('DROP TRIGGER IF EXISTS trg_no_update_stock');
+  // BUG (PG-DB-06): `DROP TRIGGER IF EXISTS x` (thieu `ON <table>`) va
+  // `CREATE TRIGGER IF NOT EXISTS ... BEGIN ... END` la SQLite-only.
+  // Tren PG => ERROR 42601 "syntax error at end of input" => ca test file fail.
+  // => dung helper dialect-aware.
+  await dropAppendOnlyTrigger('payments');
+  await dropAppendOnlyTrigger('stock_moves');
   await run("DELETE FROM payments WHERE note LIKE '%RC0%' OR note LIKE '%recon%' OR note LIKE '%RECTEST%' OR order_id IN (SELECT id FROM orders WHERE code LIKE 'DHR%')");
   await run("DELETE FROM reminder_log WHERE debt_id IN (SELECT id FROM debts WHERE note LIKE 'RECTEST%' OR order_id IN (SELECT id FROM orders WHERE code LIKE 'DHR%'))");
   await run("DELETE FROM transactions WHERE bank_ref LIKE 'RC%'");
@@ -42,11 +45,16 @@ async function cleanup() {
   await run("DELETE FROM orders WHERE code LIKE 'DHR%'");
   await run("DELETE FROM customers WHERE code LIKE 'KHR%'");
   // dung lai trigger append-only
-  await run("CREATE TRIGGER IF NOT EXISTS trg_no_update_payments BEFORE UPDATE ON payments BEGIN SELECT RAISE(ABORT,'payments append-only'); END");
-  await run("CREATE TRIGGER IF NOT EXISTS trg_no_delete_payments BEFORE DELETE ON payments BEGIN SELECT RAISE(ABORT,'payments append-only'); END");
-  await run("CREATE TRIGGER IF NOT EXISTS trg_no_update_stock BEFORE UPDATE ON stock_moves BEGIN SELECT RAISE(ABORT,'stock_moves append-only'); END");
-  await run("CREATE TRIGGER IF NOT EXISTS trg_no_delete_stock BEFORE DELETE ON stock_moves BEGIN SELECT RAISE(ABORT,'stock_moves append-only'); END");
+  await createAppendOnlyTrigger('payments');
+  await createAppendOnlyTrigger('stock_moves');
 }
+
+// BUG (TEST-ISO-02): trigger append-only la TRANG THAI CUA DB. File test khac
+// co the da drop trigger => khoi phuc truoc moi test (khong thi CHECK bi bo qua).
+test.before(async () => {
+  await createAppendOnlyTrigger('payments');
+  await createAppendOnlyTrigger('stock_moves');
+});
 
 async function setupDebts() {
   let i = 0;

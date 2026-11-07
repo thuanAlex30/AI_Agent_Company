@@ -4,6 +4,16 @@ require('./setup');
 const { tx, get } = require('../src/common/db');
 const { writeAudit } = require('../src/common/audit');
 
+// BUG (TEST-ISO-02): trigger append-only la TRANG THAI CUA DB. File test khac
+// co the da drop trigger => khoi phuc truoc moi test (khong thi CHECK bi bo qua
+// va test "audit append-only" se fail tuy bien).
+test.before(async () => {
+  const { ensureAppendOnlyTrigger } = require('./helpers/triggers');
+  await ensureAppendOnlyTrigger('audit_log');
+  await ensureAppendOnlyTrigger('payments');
+  await ensureAppendOnlyTrigger('stock_moves');
+});
+
 test('audit1: writeAudit trong tx ghi du actor/action/table/record', async () => {
   const id = Date.now();
   await tx(async (conn) => {

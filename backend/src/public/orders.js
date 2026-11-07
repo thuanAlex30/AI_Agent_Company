@@ -4,7 +4,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { ok, fail, AppError } = require('../common/errors');
-const { all, get, tx, insertedId } = require('../common/db');
+const { all, get, tx, insertedId, findByIdOrCode } = require('../common/db');
 const { reqStr, reqIntPos } = require('../common/validate');
 const { publicOrderLimiter } = require('./limiters');
 const { resolvePrice } = require('./price');
@@ -176,8 +176,18 @@ router.post('/service-requests', publicOrderLimiter, async (req, res) => {
     if (taxCode && !/^\d{10}(-\d{3})?$/.test(taxCode)) throw new AppError('VALIDATION', 'MST 10 hoac 13 so', 400);
     const note = sanitize(body.note || '', 500);
     const out = await tx(async (c) => {
-      const svc = await c.get('SELECT * FROM services WHERE (code=? OR id=?) AND COALESCE(is_published, TRUE) IS TRUE', [serviceCode, serviceCode]);
+      // PG-DB-07: `services.id` la BIGINT. Bind 'DV-TEABREAK' (ma dich vu,
+      // TEXT) vao cot `id` -> PG nem "invalid input syntax for type bigint".
+      // => tra cuu an toan theo id (so) HOAC code (chuoi).
+      const svc = await findByIdOrCode(c, 'services', serviceCode, {
+        cols: 'id, code, name, type, price, unit, description, is_published',
+      });
       if (!svc) throw new AppError('NOT_FOUND', 'Khong tim thay dich vu', 404);
+      // Giu nguyen semantics cua cau lenh goc: COALESCE(is_published, TRUE) IS TRUE
+      // (dich vu chua publish -> 404, nhu truoc).
+      if (svc.is_published === false || svc.is_published === 0) {
+        throw new AppError('NOT_FOUND', 'Khong tim thay dich vu', 404);
+      }
       let cust = await c.get('SELECT * FROM customers WHERE phone=?', [phone]);
       if (!cust) {
         const code = 'KH-WEB-' + String(Date.now()).slice(-6) + Math.floor(Math.random() * 90 + 10);

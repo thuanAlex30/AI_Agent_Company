@@ -1,0 +1,4 @@
+# Force LF cho shell scripts — checkout Windows CRLF lam bash Alpine loi
+# `$'\r': command not found` -> service backup restart loop (OPS-04).
+*.sh text eol=lf
+backend/scripts/*.sh text eol=lf

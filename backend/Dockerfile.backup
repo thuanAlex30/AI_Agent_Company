@@ -16,6 +16,13 @@ COPY package*.json ./
 RUN npm install --omit=dev
 COPY . .
 
+# OPS-04 FIX: working tree Windows checkout CRLF (w/crlf) lam bash trong
+# Alpine loi `$'\r': command not found` -> backup restart loop.
+# Strip CR khoi shell scripts ngay trong build (idempotent, chay ca khi
+# file da LF). Khong doi file tren host, khong cham local PG/volume.
+RUN sed -i 's/\r$//' /app/scripts/backup-loop.sh /app/scripts/backup.sh /app/scripts/restore-drill.sh \
+ && chmod +x /app/scripts/backup-loop.sh /app/scripts/backup.sh /app/scripts/restore-drill.sh
+
 # TZ Asia/Ho_Chi_Minh cho ten file backup theo gio Viet
 ENV TZ=Asia/Ho_Chi_Minh
 # Lenh mac dinh: vong lap sleep 1 ngay, chay backup.sh moi lan.

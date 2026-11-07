@@ -6,8 +6,15 @@ const bcrypt = require('bcryptjs');
 const { get, run } = require('../src/common/db');
 const gov = require('../src/modules/governance/approvals');
 const supplyService = require('../src/modules/supply/service');
+const { ensureStockAll } = require('./helpers/stock');
 
 const S = Date.now();
+
+// BUG (TEST-ISO-01): ton kho bi tieu het giua cac file test (cung DB) =>
+// receivePO fail "Kho khong du ..." tren PostgreSQL.
+test.before(async () => {
+  await ensureStockAll(['CF-SUA-01', 'BANH-01', 'TRA-DAO-01'], 500);
+});
 
 async function ensureUser(username, role, employee_code) {
   let u = await get('SELECT * FROM users WHERE username=?', [username]);

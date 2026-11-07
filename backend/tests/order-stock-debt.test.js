@@ -4,12 +4,21 @@ require('./setup');
 const { get, run } = require('../src/common/db');
 const salesService = require('../src/modules/sales/service');
 const financeService = require('../src/modules/finance/service');
+const { ensureStockAll } = require('./helpers/stock');
 
 const S = Date.now();
 async function stockOf(sku) {
   const r = await get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [sku]);
   return Number(r.s);
 }
+
+// BUG (TEST-ISO-01): ton kho seed chi co 25 (BANH-01) / 50 (CF-SUA-01) va
+// cac test file khac cung tieu ton tren CUNG DB test => het hang =>
+// o2c5 fail "Kho khong du BANH-01 (ton 0)" (chi FAIL tren PostgreSQL).
+// FIX: dam bao ton kho TRUOC MOI test trong file.
+test.before(async () => {
+  await ensureStockAll(['CF-SUA-01', 'BANH-01', 'TRA-DAO-01'], 500);
+});
 
 test('o2c1: createOrder tru kho + sinh receivable + shipment', async () => {
   const cust = await get("SELECT * FROM customers WHERE code='KH001'");

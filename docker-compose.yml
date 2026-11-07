@@ -6,6 +6,12 @@ services:
   postgres:
     image: postgres:15-alpine
     restart: unless-stopped
+    # OPS-01 FIX: publish Postgres ra host de pgAdmin/dev truy cap tu Windows.
+    # Local PG (D:\PostgreSQL\18) dang giu 5432 + temp instance giu 5433,
+    # nen mac dinh publish 5434 -> 5432 (doi qua PG_PORT_PUBLISH trong .env).
+    # Chi bind localhost, khong public ra LAN/internet.
+    ports:
+      - "127.0.0.1:${PG_PORT_PUBLISH:-5434}:5432"
     environment:
       - POSTGRES_USER=${PG_USER:-bizops}
       - POSTGRES_PASSWORD=${PG_PASSWORD:?dat PG_PASSWORD trong .env truoc khi up}

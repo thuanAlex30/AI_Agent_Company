@@ -1,6 +1,6 @@
 const express = require('express');
 const { ok, fail, AppError } = require('../common/errors');
-const { all, get, norm } = require('../common/db');
+const { all, get, norm, findByIdOrCode } = require('../common/db');
 const { publicLimiter } = require('./limiters');
 const { resolvePrice } = require('./price');
 
@@ -117,11 +117,16 @@ router.get('/services', __lim, async (req, res) => {
 router.get('/services/:id', __lim, async (req, res) => {
   try {
     const id = req.params.id;
-    const row = await get(
-      'SELECT id, code, name, type, price, unit, description FROM services WHERE (id=? OR code=?) AND COALESCE(is_published, TRUE) IS TRUE',
-      [id, id]
-    );
+    // PG-DB-07: `services.id` la BIGINT. Bind chuoi (ma 'DV-TEABREAK') vao
+    // cot `id` -> PG nem "invalid input syntax for type bigint" => 500.
+    // => tra cuu an toan theo id (so) HOAC code (chuoi).
+    const row = await findByIdOrCode(require('../common/db'), 'services', id, {
+      cols: 'id, code, name, type, price, unit, description, is_published',
+    });
     if (!row) throw new AppError('NOT_FOUND', 'Khong tim thay dich vu', 404);
+    if (row.is_published === false || row.is_published === 0) {
+      throw new AppError('NOT_FOUND', 'Khong tim thay dich vu', 404);
+    }
     res.set('Cache-Control', 'public, max-age=60');
     return ok(res, row);
   } catch (e) { return fail(res, e); }

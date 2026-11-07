@@ -131,8 +131,8 @@ function fileVersion(file) {
 
 async function migrate() {
   const files = DIALECT === 'pg'
-    ? ['001_init.postgres.sql', '002_storefront.postgres.sql', '003_datetime_normalize.postgres.sql', '004_session.postgres.sql', '005_dept_scope.postgres.sql', '006_backfill_dept_scope.postgres.sql']
-    : ['001_init.sql', '002_storefront.sql', '003_datetime_normalize.sql', '004_session.sql', '005_dept_scope.sql', '006_backfill_dept_scope.sql'];
+    ? ['001_init.postgres.sql', '002_storefront.postgres.sql', '003_datetime_normalize.postgres.sql', '004_session.postgres.sql', '005_dept_scope.postgres.sql', '006_backfill_dept_scope.postgres.sql', '007_qa_ref_id_text.postgres.sql']
+    : ['001_init.sql', '002_storefront.sql', '003_datetime_normalize.sql', '004_session.sql', '005_dept_scope.sql', '006_backfill_dept_scope.sql', '007_qa_ref_id_text.sql'];
 
   if (DIALECT === 'pg') {
     const { Pool } = require('pg');

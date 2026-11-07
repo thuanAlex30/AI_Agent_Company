@@ -4,9 +4,16 @@ require('./setup');
 const { get, run } = require('../src/common/db');
 const salesService = require('../src/modules/sales/service');
 const financeService = require('../src/modules/finance/service');
+const { ensureStockAll } = require('./helpers/stock');
 
 const S = Date.now();
 let debtId, orderId;
+
+// BUG (TEST-ISO-01): ton kho bi tieu het giua cac file test (cung DB) =>
+// payment/order test fail "Kho khong du ..." tren PostgreSQL.
+test.before(async () => {
+  await ensureStockAll(['CF-SUA-01', 'BANH-01', 'TRA-DAO-01'], 500);
+});
 
 test('pay1: Idempotency-Key chong double-click (bam dup khong dup payment)', async () => {
   const cust = await get("SELECT * FROM customers WHERE code='KH001'");
@@ -39,13 +46,17 @@ test('pay2: vuot remain bi chan', async () => {
 
 test('pay3: expense chua duyet -> APPROVAL_REQUIRED; duyet roi ghi payment', async () => {
   const code = `CPK-${S}`;
-  await run('INSERT INTO expenses(code,type,amount,paid,status,created_by) VALUES(?,\'fee\',500000,0,\'open\',\'test\')', [code]);
+  // BUG (PG-DB-04): `created_by` la cot BIGINT (ID nguoi). Literal 'test'
+  // trong SQL raw => SQLite ghi tam chuoi (du lieu sai, im lang), PG nem loi
+  // "invalid input syntax for type bigint". => dung ID nguoi that.
+  const admin = await get("SELECT id FROM users WHERE username='admin'");
+  await run('INSERT INTO expenses(code,type,amount,paid,status,created_by) VALUES(?,\'fee\',500000,0,\'open\',?)', [code, admin.id]);
   const e = await get('SELECT * FROM expenses WHERE code=?', [code]);
   await assert.rejects(
     () => financeService.recordPayment(null, { expense_id: e.id, amount: 200000, method: 'cash', actor: 'test' }),
     (err) => err.code === 'APPROVAL_REQUIRED'
   );
-  await run("INSERT INTO approvals(ref_type,ref_id,requester,level,status) VALUES('expense',?,1,'leader','approved')", [e.id]);
+  await run("INSERT INTO approvals(ref_type,ref_id,requester,level,status) VALUES('expense',?,?,'leader','approved')", [e.id, admin.id]);
   const r = await financeService.recordPayment(null, { expense_id: e.id, amount: 200000, method: 'cash', actor: 'test' });
   assert.ok(r.id);
   const e2 = await get('SELECT * FROM expenses WHERE id=?', [e.id]);

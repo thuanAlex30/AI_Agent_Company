@@ -20,6 +20,10 @@ mkdir -p "$OUT_DIR"
 
 # --- PostgreSQL (production) -------------------------------------------------
 if [ -n "${PG_HOST:-}" ]; then
+  # OPS-04 FIX: pg_dump/psql/pg_restore doc mat khau qua PGPASSWORD.
+  # Compose chi cap PG_PASSWORD -> phai export, neu khong bao
+  # "fe_sendauth: no password supplied" va backup FAIL vinh vien.
+  export PGPASSWORD="${PG_PASSWORD:-}"
   OUT="${OUT_DIR}/bizops-${STAMP}.dump"
   echo "[backup] pg_dump ${PG_HOST}/${PG_DB} -> ${OUT}"
   # -F c = custom format (pg_restore), khong dump SQL text.

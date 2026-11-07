@@ -9,7 +9,23 @@ async function list(conn) {
   return c.query('SELECT * FROM qa_checks ORDER BY id DESC LIMIT 200');
 }
 // P2-21: mapping ref_type -> bang dich (validate ref_id TON TAI).
-const REF_TABLE = { order: 'orders', shipment: 'shipments', product: 'products' };
+//
+// BUG (PG-DB-08 / DATA-08): `ref_type='product'` tro toi `products` — bang
+// nay khoa chinh la `sku` (TEXT), KHONG co cot `id`.
+//   - Query `SELECT id FROM products WHERE id=?`:
+//       SQLite: "no such column: id"
+//       PostgreSQL: `column "id" does not exist`
+//
+// BUG (PG-DB-10): `qa_checks.ref_id` sau migration 007 la TEXT (de chua ca
+// SO (order/shipment id) va MA (product sku)). => khi so sanh voi cot BIGINT
+// (`orders.id`, `shipments.id`) phai chuyen sang SO, neu khong PG nem
+// "invalid input syntax for type bigint" khi client gui chuoi.
+const REF_TABLE = {
+  order: { table: 'orders', idCol: 'id', numeric: true },
+  shipment: { table: 'shipments', idCol: 'id', numeric: true },
+  // products: khoa chinh TEXT `sku` -> so sanh thang chuoi.
+  product: { table: 'products', idCol: 'sku', numeric: false },
+};
 
 async function create(conn, { ref_type, ref_id, result, defect = null, repeat_of = null, checker = null }) {
   const db = require('../../common/db');
@@ -19,8 +35,15 @@ async function create(conn, { ref_type, ref_id, result, defect = null, repeat_of
   // P2-21: validate `ref_id` TON TAI theo `ref_type` — khong cho tao QA
   // troi (ref_id bat ky) lam cham ho so lieu kiem tra chat luong.
   const tbl = REF_TABLE[ref_type];
-  if (ref_id == null || !tbl) throw new AppError('VALIDATION', 'ref_id bat buoc', 400);
-  const ref = await c.get(`SELECT id FROM ${tbl} WHERE id=?`, [ref_id]);
+  if (ref_id == null || ref_id === '' || !tbl) throw new AppError('VALIDATION', 'ref_id bat buoc', 400);
+  // Cot so: chi so sanh khi gia tri THAT LA so (chuoi -> 404, khong nem loi).
+  let lookup = ref_id;
+  if (tbl.numeric) {
+    const n = Number(ref_id);
+    if (!Number.isInteger(n) || n <= 0) throw new AppError('NOT_FOUND', `Khong tim thay ${ref_type} ${ref_id}`, 404);
+    lookup = n;
+  }
+  const ref = await c.get(`SELECT ${tbl.idCol} FROM ${tbl.table} WHERE ${tbl.idCol}=?`, [lookup]);
   if (!ref) throw new AppError('NOT_FOUND', `Khong tim thay ${ref_type} ${ref_id}`, 404);
   // P2-21: `repeat_of` cung phai la QA check that.
   if (repeat_of != null) {

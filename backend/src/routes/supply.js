@@ -174,15 +174,22 @@ router.post('/qa-checks', requireScoped('qa.write'), async (req, res) => {
   try {
     const refType = reqStr(req.body, 'ref_type', { enum: ['order', 'shipment', 'product'] });
     const refId = req.body.ref_id;
-    const { writeAudit } = require('../common/audit');
+    // P2-21 / DATA-08: phai validate `ref_id` TON TAI theo `ref_type` (route
+    // truoc day INSERT thang, bo qua validate cua service `qaService.create`):
+    //   - `ref_type='product'` -> `ref_id` la SKU (TEXT), kiem tra bang `sku`
+    //   - `ref_type='order'|'shipment'` -> `ref_id` la ID (so)
+    // => dung service (co validate + audit trong cung tx).
+    const qaService = require('../modules/qa/service');
     // Phase 3: QA thuoc phong ban qa; ghi resource_dept + audit trong cung tx.
     const out = await tx(async (c) => {
-      const r = await c.run('INSERT INTO qa_checks(ref_type,ref_id,result,defect,checker) VALUES(?,?,?,?,?)',
-        [refType, refId, reqStr(req.body, 'result', { enum: ['pass', 'fail'] }), req.body.defect || null, req.user.username]);
-      const id = insertedId(r, 'qa_checks');
-      await setBusinessScope(c, 'qa_checks', id, 'qa');
-      await writeAudit(c, req.user.username, 'create', 'qa_checks', id, null, { ref_type: refType, ref_id: refId });
-      return { id };
+      const r = await qaService.create(c, {
+        ref_type: refType, ref_id: refId,
+        result: reqStr(req.body, 'result', { enum: ['pass', 'fail'] }),
+        defect: req.body.defect || null,
+        checker: req.user.username,
+      });
+      await setBusinessScope(c, 'qa_checks', r.id, 'qa');
+      return r;
     });
     return ok(res, out);
   } catch (e) { return fail(res, e); }

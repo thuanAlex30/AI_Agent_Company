@@ -22,6 +22,7 @@ const financeService = require('../src/modules/finance/service');
 const supplyService = require('../src/modules/supply/service');
 const itService = require('../src/modules/it/service');
 const qaService = require('../src/modules/qa/service');
+const { ensureStockAll } = require('./helpers/stock');
 
 const S = Date.now();
 
@@ -54,6 +55,16 @@ async function ensureStock(sku, qty = 500) {
   }
   return Number((await db.get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [sku]))?.s || 0);
 }
+
+// BUG (TEST-ISO-01): `ensureStock` duoc DINH NGHIA nhung KHONG BAO GIO DUOC GOI.
+// Ton kho seed chi co 25 (BANH-01) va cac test file khac (public-write,
+// phase5...) cung tieu ton tren CUNG DB => het hang => p404/p407 fail
+// "Kho khong du BANH-01 (ton 0)" (PASS tuy bien tren SQLite vi ton con lai,
+// FAIL tren PostgreSQL vi DB seed it hon).
+// FIX: dam bao ton kho TRUOC MOI test trong file.
+test.before(async () => {
+  await ensureStockAll(['CF-SUA-01', 'BANH-01', 'TRA-DAO-01'], 500);
+});
 
 // ---------------------------------------------------------------------------
 // p401: cap duyet LUON tinh tu approval-matrix.json — client khong ep cap duoc
