@@ -82,3 +82,5 @@ OPS-04,.env.example day du bien moi truong van hanh,system,verify-gate,tab-all
 QA-06,Verify >= 400 assert + doc source THAT (khong xanh gia),system,verify-gate,tab-all
 SEC-09,Login/refresh/session — vong doi refresh token + reuse detection,refresh_tokens+users,auth.test.js,tab-all
 QA-07,Phase 6 ops — readiness co checks.agent + log request_id + RBAC 403 log,system,phase6.test.js,tab-all
+SEC-10,Agent khong lam lo cong no cua phong ban khac (debt leak qua agent),debts,sec01-debt-leak.test.js,tab-all
+QA-08,Agent rule-based chat + availability + public chat,agent,chat-rule.test.js|avail01.test.js|public-chat.test.js,tab-cskh
