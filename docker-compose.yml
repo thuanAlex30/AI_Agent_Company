@@ -1,14 +1,61 @@
 services:
+  # ---------------------------------------------------------------------
+  # PostgreSQL 15 — DB production (P0-04 / OPS-01).
+  # Volume persistent: `bizops-pgdata`. Khong dung file SQLite trong prod.
+  # ---------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${PG_USER:-bizops}
+      - POSTGRES_PASSWORD=${PG_PASSWORD:?dat PG_PASSWORD trong .env truoc khi up}
+      - POSTGRES_DB=${PG_DB:-bizops}
+    volumes:
+      - bizops-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready -U <user> -d <db>: chi bao ready khi server accept truy van.
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-bizops} -d ${PG_DB:-bizops}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ---------------------------------------------------------------------
+  # Release job: chay migration + seed (chi 1 lan theo release).
+  # Khong chay migration tu dong trong moi container backend — tranh
+  # nhieu instance chay migration cung luc (P0-04 / OPS-01).
+  # ---------------------------------------------------------------------
+  migrate:
+    build: ./backend
+    environment:
+      - NODE_ENV=production
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${PG_USER:-bizops}
+      - PG_PASSWORD=${PG_PASSWORD:?dat PG_PASSWORD trong .env truoc khi up}
+      - PG_DB=${PG_DB:-bizops}
+    command: ["node", "src/db/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   backend:
     build: ./backend
     ports:
-      - "3000:3000"
+      # SEC-03: backend KHONG public truc tiep ra internet.
+      # Chi bind localhost; truy cap qua ERP/Storefront/nginx tren may chu.
+      - "127.0.0.1:3000:3000"
     environment:
       - PORT=3000
       - NODE_ENV=production
-      - DATABASE_PATH=/data/bizops.db
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${PG_USER:-bizops}
+      - PG_PASSWORD=${PG_PASSWORD:?dat PG_PASSWORD trong .env truoc khi up}
+      - PG_DB=${PG_DB:-bizops}
       - JWT_SECRET=${JWT_SECRET:?dat JWT_SECRET trong .env truoc khi up}
-      - CORS_ORIGIN=http://localhost:5173,http://localhost:5174
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:5173,http://localhost:5174}
       - AGENT_URL=http://agent:3100
       - AGENT_INTERNAL_KEY=${AGENT_INTERNAL_KEY:?dat AGENT_INTERNAL_KEY trong .env truoc khi up}
       - AGENT_PUBLIC_KEY=${AGENT_PUBLIC_KEY:?dat AGENT_PUBLIC_KEY trong .env truoc khi up}
@@ -16,16 +63,19 @@ services:
       - AGENT_PUBLIC_KEY_OLD=${AGENT_PUBLIC_KEY_OLD:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:?dat WEBHOOK_SECRET trong .env truoc khi up}
     volumes:
-      - ./data:/data
       - ./logs:/app/logs
     depends_on:
+      postgres:
+        condition: service_healthy
       agent:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      # OPS-03: readiness — kiem tra DB thật, khong chi process con song.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   agent:
@@ -35,18 +85,24 @@ services:
     environment:
       - AGENT_PORT=3100
       - NODE_ENV=production
-      - DATABASE_PATH=/data/bizops.db
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${PG_USER:-bizops}
+      - PG_PASSWORD=${PG_PASSWORD:?dat PG_PASSWORD trong .env truoc khi up}
+      - PG_DB=${PG_DB:-bizops}
       - AGENT_INTERNAL_KEY=${AGENT_INTERNAL_KEY:?dat AGENT_INTERNAL_KEY trong .env truoc khi up}
       - AGENT_PUBLIC_KEY=${AGENT_PUBLIC_KEY:?dat AGENT_PUBLIC_KEY trong .env truoc khi up}
       - AGENT_INTERNAL_KEY_OLD=${AGENT_INTERNAL_KEY_OLD:-}
       - AGENT_PUBLIC_KEY_OLD=${AGENT_PUBLIC_KEY_OLD:-}
-    volumes:
-      - ./data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3100/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3100/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # ERP noi bo (khong public ra internet — chi bind localhost)
@@ -55,17 +111,45 @@ services:
     ports:
       - "127.0.0.1:5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
-  # Storefront public
+  # Storefront public — Nginx proxy /api -> backend (WEB-01).
   storefront:
     build: ./storefront
     ports:
       - "5174:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # OPS-04: backup job. Image rieng co pg_dump + bash (node:20-alpine
+  # mac dinh khong co). Chay theo schedule, luu vao volume persistent
+  # `bizops-backups` (khong nam trong writable layer cua container).
+  # ---------------------------------------------------------------------
+  backup:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backup
+    environment:
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${PG_USER:-bizops}
+      - PG_PASSWORD=${PG_PASSWORD:?dat PG_PASSWORD trong .env truoc khi up}
+      - PG_DB=${PG_DB:-bizops}
+      - BACKUP_DIR=/backups
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-14}
+      - BACKUP_CRON=${BACKUP_CRON:-0 3 * * *}
+    volumes:
+      - bizops-backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  bizops-data:
+  bizops-pgdata:
+  bizops-backups:

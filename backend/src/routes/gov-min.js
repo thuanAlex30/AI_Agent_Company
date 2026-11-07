@@ -41,9 +41,13 @@ router.post('/users/:id/unlock', requirePerm('users.unlock'), async (req, res) =
   try {
     const u = await get('SELECT * FROM users WHERE id=?', [req.params.id]);
     if (!u) throw new AppError('NOT_FOUND', 'Khong tim thay user', 404);
-    await run('UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=?', [req.params.id]);
+    const { tx } = require('../common/db');
     const { writeAudit } = require('../common/audit');
-    await writeAudit(null, req.user.username, 'update', 'users', req.params.id, { locked: true }, { locked: false });
+    // GOV-01: ghi du lieu + audit trong CUNG transaction.
+    await tx(async (c) => {
+      await c.run('UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=?', [req.params.id]);
+      await writeAudit(c, req.user.username, 'update', 'users', req.params.id, { locked: true }, { locked: false });
+    });
     return ok(res, { id: Number(req.params.id), unlocked: true });
   } catch (e) { return fail(res, e); }
 });

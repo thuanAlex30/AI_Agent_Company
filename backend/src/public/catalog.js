@@ -56,7 +56,7 @@ router.get('/products', __lim, async (req, res) => {
     const search = (req.query.search || '').trim();
     const channel = (req.query.channel || 'web').trim();
 
-    let rows = await all("SELECT * FROM products WHERE COALESCE(is_published,1)=1 ORDER BY sort_order, name");
+    let rows = await all("SELECT * FROM products WHERE COALESCE(is_published, TRUE) IS TRUE ORDER BY sort_order, name");
     if (category) rows = rows.filter(r => (r.category || 'cafe') === category);
     if (search) {
       const qn = norm(search);
@@ -90,7 +90,7 @@ router.get('/products/:slug', __lim, async (req, res) => {
     const slug = String(req.params.slug || '').slice(0, 64);
     const channel = (req.query.channel || 'web').trim();
     const row = await get(
-      'SELECT * FROM products WHERE (slug=? OR sku=?) AND COALESCE(is_published,1)=1',
+      'SELECT * FROM products WHERE (slug=? OR sku=?) AND COALESCE(is_published, TRUE) IS TRUE',
       [slug, slug]
     );
     if (!row) throw new AppError('NOT_FOUND', 'Khong tim thay san pham', 404);
@@ -108,7 +108,7 @@ router.get('/products/:slug', __lim, async (req, res) => {
 
 router.get('/services', __lim, async (req, res) => {
   try {
-    const rows = await all('SELECT id, code, name, type, price, unit, description, sort_order FROM services WHERE COALESCE(is_published,1)=1 ORDER BY sort_order, id');
+    const rows = await all('SELECT id, code, name, type, price, unit, description, sort_order FROM services WHERE COALESCE(is_published, TRUE) IS TRUE ORDER BY sort_order, id');
     res.set('Cache-Control', 'public, max-age=60');
     return ok(res, { items: rows });
   } catch (e) { return fail(res, e); }
@@ -118,7 +118,7 @@ router.get('/services/:id', __lim, async (req, res) => {
   try {
     const id = req.params.id;
     const row = await get(
-      'SELECT id, code, name, type, price, unit, description FROM services WHERE (id=? OR code=?) AND COALESCE(is_published,1)=1',
+      'SELECT id, code, name, type, price, unit, description FROM services WHERE (id=? OR code=?) AND COALESCE(is_published, TRUE) IS TRUE',
       [id, id]
     );
     if (!row) throw new AppError('NOT_FOUND', 'Khong tim thay dich vu', 404);
@@ -129,7 +129,7 @@ router.get('/services/:id', __lim, async (req, res) => {
 
 router.get('/banners', __lim, async (req, res) => {
   try {
-    const rows = await all('SELECT slug, title, image_url, link, sort_order FROM banners WHERE COALESCE(is_active,1)=1 ORDER BY sort_order, id');
+    const rows = await all('SELECT slug, title, image_url, link, sort_order FROM banners WHERE COALESCE(is_active, TRUE) IS TRUE ORDER BY sort_order, id');
     res.set('Cache-Control', 'public, max-age=60');
     return ok(res, { items: rows });
   } catch (e) { return fail(res, e); }
@@ -139,7 +139,7 @@ router.get('/promotions', __lim, async (req, res) => {
   try {
     const { businessDayVN } = require('../common/db');
     const today = businessDayVN();
-    const rows = await all('SELECT code, title, description, start_date, end_date FROM promotions WHERE COALESCE(is_active,1)=1 AND (start_date IS NULL OR start_date <= ?) AND (end_date IS NULL OR end_date >= ?) ORDER BY id DESC', [today, today]);
+    const rows = await all('SELECT code, title, description, start_date, end_date FROM promotions WHERE COALESCE(is_active, TRUE) IS TRUE AND (start_date IS NULL OR start_date <= ?) AND (end_date IS NULL OR end_date >= ?) ORDER BY id DESC', [today, today]);
     res.set('Cache-Control', 'public, max-age=60');
     return ok(res, { items: rows });
   } catch (e) { return fail(res, e); }

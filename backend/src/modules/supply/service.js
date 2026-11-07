@@ -10,6 +10,21 @@ async function withTx(fn, conn) {
 // NOTE: supply so huu products/purchase_orders/shipments/stock_moves/sop_tasks/suppliers.
 // Payable di qua financeService.createPayable (khong INSERT bang cua finance).
 
+// TX-02: doc ton kho co khoa dong hang.
+//   - Buoc 1: khoa ROW cua product (SELECT ... FROM products WHERE sku=? FOR UPDATE).
+//     Day la "mutex" theo SKU: moi giao dich ghi ton kho cung SKU se cho
+//     den khi transaction truoc release -> khong con oversell.
+//   - Buoc 2: tinh tong ton kho tu stock_moves (append-only).
+//   - SQLite: khong co row lock -> tx da serialize toan bo (TX-01) nen
+//     read+write trong cung transaction van atomic.
+async function readOnhand(c, sku) {
+  if (typeof c.lock === 'function') {
+    await c.lock('SELECT sku FROM products WHERE sku=?', [sku]);
+  }
+  const row = await c.get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [sku]);
+  return Number(row?.s || 0);
+}
+
 async function moveStock(conn, { sku, type, qty, ref_code = null, created_by = null, idempotency_key = null }) {
   return withTx(async (c) => {
     if (!sku || !type || !qty) throw new AppError('VALIDATION', 'moveStock can sku+type+qty', 400);
@@ -22,7 +37,10 @@ async function moveStock(conn, { sku, type, qty, ref_code = null, created_by = n
       if (dup) return { id: dup.id, deduped: true };
     }
     if (type === 'out') {
-      const onhand = (await c.get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [sku]))?.s || 0;
+      // TX-02: khoa doc ton kho (FOR UPDATE tren PG) de tranh oversell.
+      // Doc + ghi phai nam trong CUNG transaction, va doc phai co lock
+      // thi moi atomic voi concurrent "out" cua SKU cung.
+      const onhand = await readOnhand(c, sku);
       if (Number(onhand) + Number(qty) < 0) throw new AppError('STOCK_SHORTAGE', `Kho khong du ${sku} (ton ${onhand})`, 409);
     }
     const r = await c.run(

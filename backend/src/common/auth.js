@@ -48,32 +48,79 @@ async function login(username, password) {
   return { token: access, refresh, user: { id: user.id, username: user.username, role: user.role, employee_code: user.employee_code } };
 }
 
+/**
+ * SEC-02 / AUTH-REFRESH-RACE-001: xoay vong refresh token ATOMIC + phat hien tai su dung lai.
+ *
+ * Race truoc day:
+ *   1. doc row (revoked=false)
+ *   2. UPDATE revoked=true
+ *   3. INSERT token moi
+ *   10 request refresh cung 1 token -> nhieu request doc duoc revoked=false
+ *   truoc khi buoc 2 chay -> tat ca deu thay cong va tao 10 token moi.
+ *
+ * Fix:
+ *   - UPDATE ... WHERE id=? AND revoked IS NOT TRUE (conditional update).
+ *     Chi request nao "thang" moi co changes=1. Request khac changes=0 -> 401.
+ *   - Thuc hien trong 1 transaction (tx) -> insert token moi + revoke la atomic.
+ *   - REUSE DETECTION: token da bi revoke -> dau hieu bi replay (token bi
+ *     attacker lay duoc). Khi do thu hoi TAT CA token cua user do
+ *     (session hijack -> force re-login) va ghi log canh bao.
+ */
 async function refresh(refreshToken) {
   if (!refreshToken) throw new AppError('AUTH', 'Refresh token het han', 401);
   const h = hashToken(refreshToken);
-  const row = await get('SELECT * FROM refresh_tokens WHERE token_hash=?', [h]);
-  // revoked: 1/true (sqlite 1, pg true) la da thu hoi; dialect-tolerant
-  if (!row || row.revoked === 1 || row.revoked === true || new Date(row.expires_at) < new Date()) {
-    throw new AppError('AUTH', 'Refresh token het han', 401);
-  }
-  const user = await get('SELECT * FROM users WHERE id=?', [row.user_id]);
-  if (!user) throw new AppError('AUTH', 'Tai khoan khong ton tai', 401);
-  await run('UPDATE refresh_tokens SET revoked=1 WHERE id=?', [row.id]); // xoay vong
-  const access = signAccess(user);
-  const next = crypto.randomBytes(32).toString('hex');
-  const expires = new Date(Date.now() + REFRESH_DAYS * 86400000).toISOString();
-  await run('INSERT INTO refresh_tokens(user_id,token_hash,expires_at) VALUES(?,?,?)', [user.id, hashToken(next), expires]);
-  return { token: access, refresh: next };
+  const { tx } = require('./db');
+
+  return tx(async (c) => {
+    const row = await c.get('SELECT * FROM refresh_tokens WHERE token_hash=?', [h]);
+    if (!row) throw new AppError('AUTH', 'Refresh token het han', 401);
+
+    const expired = new Date(row.expires_at) < new Date();
+    const revoked = row.revoked === 1 || row.revoked === true;
+
+    if (revoked) {
+      // REUSE DETECTION: token da xoay vong lai duoc dung -> co thang bi attacker
+      // lay. Thu hoi toan bo session cua user do va ghi log canh bao.
+      try {
+        await c.run('UPDATE refresh_tokens SET revoked=TRUE WHERE user_id=? AND revoked IS NOT TRUE', [row.user_id]);
+      } catch (e) {
+        logger.error('reuse-detection revoke-all fail', { msg: e.message });
+      }
+      logger.warn('refresh token reuse detected — thu hoi toan bo session', {
+        user_id: row.user_id, token_id: row.id,
+      });
+      throw new AppError('AUTH', 'Refresh token het han', 401);
+    }
+    if (expired) throw new AppError('AUTH', 'Refresh token het han', 401);
+
+    const user = await c.get('SELECT * FROM users WHERE id=?', [row.user_id]);
+    if (!user) throw new AppError('AUTH', 'Tai khoan khong ton tai', 401);
+
+    // Conditional update: chi request "thang" moi thay doi 1 dong.
+    const upd = await c.run(
+      'UPDATE refresh_tokens SET revoked=TRUE WHERE id=? AND revoked IS NOT TRUE',
+      [row.id]
+    );
+    if (!upd || Number(upd.changes) !== 1) {
+      // Request khac da xoay vong truoc -> 401 (chi 1 request duoc phep).
+      throw new AppError('AUTH', 'Refresh token het han', 401);
+    }
+
+    const access = signAccess(user);
+    const next = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + REFRESH_DAYS * 86400000).toISOString();
+    await c.run('INSERT INTO refresh_tokens(user_id,token_hash,expires_at) VALUES(?,?,?)', [user.id, hashToken(next), expires]);
+    return { token: access, refresh: next };
+  });
 }
 
 async function logout(refreshToken) {
   if (!refreshToken) return { revoked: false };
-  await run('UPDATE refresh_tokens SET revoked=1 WHERE token_hash=?', [hashToken(refreshToken)]);
+  await run('UPDATE refresh_tokens SET revoked=TRUE WHERE token_hash=?', [hashToken(refreshToken)]);
   return { revoked: true };
 }
 
-function authenticate(req, res, next) {
-  // dev-only: x-user-code (cam o prod)
+async function authenticate(req, res, next) {  // dev-only: x-user-code (cam o prod)
   if (req.headers['x-user-code'] && process.env.NODE_ENV !== 'production') {
     logger.warn('x-user-code dev-only', { code: req.headers['x-user-code'] });
     req.userDev = String(req.headers['x-user-code']);
@@ -89,6 +136,17 @@ function authenticate(req, res, next) {
   try {
     const p = jwt.verify(token, JWT_SECRET || 'dev-secret-khong-dung-prod');
     req.user = { id: p.sub, username: p.username, role: p.role, employee_code: p.employee_code };
+    // SEC-01: kem phong ban cua nhan vien vao req.user de enforce scope
+    // theo phong ban (khong chi theo role matrix).
+    if (req.user.employee_code) {
+      try {
+        const db = require('./db');
+        const emp = await db.get('SELECT dept_code FROM employees WHERE code=?', [req.user.employee_code]);
+        if (emp) req.user.dept_code = emp.dept_code;
+      } catch (e) {
+        logger.warn('resolve dept_code that bai', { employee_code: req.user.employee_code, msg: e.message });
+      }
+    }
     return next();
   } catch {
     return next(new AppError('AUTH', 'Token het han hoac khong hop le', 401));

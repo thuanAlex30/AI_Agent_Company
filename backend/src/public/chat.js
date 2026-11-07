@@ -21,8 +21,9 @@ router.post('/chat', publicChatLimiter, async (req, res) => {
         'Content-Type': 'application/json',
         'x-agent-key': AGENT_PUBLIC_KEY,
         // AVAIL-01 FIX v7: chuyen IP that cua khach de agent gioi han theo khach,
-        // khong de moi khach don thanh 1 IP (backend) lam chan ca website
-        'x-client-ip': req.ip || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown',
+        // khong de moi khach don thanh 1 IP (backend) lam chan ca website.
+        // SEC-03: dung req.ip (da qua proxy-trust) — KHONG tin raw x-forwarded-for.
+        'x-client-ip': require('../common/security').clientIp(req),
         'x-request-id': req.requestId || '',
       },
       body: JSON.stringify({

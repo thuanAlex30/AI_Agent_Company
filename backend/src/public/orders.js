@@ -84,7 +84,7 @@ router.post('/orders', publicOrderLimiter, async (req, res) => {
         const sku = String(it.sku || '').slice(0, 32);
         const qty = Number(it.qty);
         if (!sku || !Number.isInteger(qty) || qty <= 0 || qty > 100) throw new AppError('VALIDATION', `Item ${sku} qty 1-100`, 400);
-        const p = await c.get('SELECT * FROM products WHERE sku=? AND COALESCE(is_published,1)=1', [sku]);
+        const p = await c.get('SELECT * FROM products WHERE sku=? AND COALESCE(is_published, TRUE) IS TRUE', [sku]);
         if (!p) throw new AppError('NOT_FOUND', `Khong tim thay SKU ${sku}`, 404);
         const pr = await resolvePrice(sku, p.price, 'web');
         amount += Number(pr.price) * qty;
@@ -164,7 +164,7 @@ router.post('/service-requests', publicOrderLimiter, async (req, res) => {
     if (taxCode && !/^\d{10}(-\d{3})?$/.test(taxCode)) throw new AppError('VALIDATION', 'MST 10 hoac 13 so', 400);
     const note = sanitize(body.note || '', 500);
     const out = await tx(async (c) => {
-      const svc = await c.get('SELECT * FROM services WHERE (code=? OR id=?) AND COALESCE(is_published,1)=1', [serviceCode, serviceCode]);
+      const svc = await c.get('SELECT * FROM services WHERE (code=? OR id=?) AND COALESCE(is_published, TRUE) IS TRUE', [serviceCode, serviceCode]);
       if (!svc) throw new AppError('NOT_FOUND', 'Khong tim thay dich vu', 404);
       let cust = await c.get('SELECT * FROM customers WHERE phone=?', [phone]);
       if (!cust) {

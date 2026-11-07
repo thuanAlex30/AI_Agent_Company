@@ -85,6 +85,16 @@ CREATE TABLE IF NOT EXISTS customers (
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+CREATE TABLE IF NOT EXISTS campaigns (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  channel TEXT NOT NULL CHECK (channel IN ('facebook','tiktok','zalo','shopee','offline','seo')),
+  cost BIGINT DEFAULT 0,
+  start_date DATE NULL,
+  end_date DATE NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS leads (
   id BIGSERIAL PRIMARY KEY,
   name TEXT NOT NULL,
@@ -123,16 +133,6 @@ CREATE TABLE IF NOT EXISTS contracts (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE IF NOT EXISTS campaigns (
-  id BIGSERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  channel TEXT NOT NULL CHECK (channel IN ('facebook','tiktok','zalo','shopee','offline','seo')),
-  cost BIGINT DEFAULT 0,
-  start_date DATE NULL,
-  end_date DATE NULL,
-  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
 CREATE TABLE IF NOT EXISTS orders (
   id BIGSERIAL PRIMARY KEY,
   code TEXT UNIQUE NOT NULL,
@@ -149,14 +149,6 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(order_date);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
-CREATE TABLE IF NOT EXISTS order_items (
-  id BIGSERIAL PRIMARY KEY,
-  order_id BIGINT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  product_sku TEXT NOT NULL REFERENCES products(sku) ON DELETE RESTRICT,
-  qty INTEGER NOT NULL CHECK (qty > 0),
-  price BIGINT NOT NULL,
-  cost BIGINT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS products (
   sku TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -166,6 +158,14 @@ CREATE TABLE IF NOT EXISTS products (
   stock_alert INTEGER DEFAULT 10,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS order_items (
+  id BIGSERIAL PRIMARY KEY,
+  order_id BIGINT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  product_sku TEXT NOT NULL REFERENCES products(sku) ON DELETE RESTRICT,
+  qty INTEGER NOT NULL CHECK (qty > 0),
+  price BIGINT NOT NULL,
+  cost BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS stock_moves (
   id BIGSERIAL PRIMARY KEY,
@@ -181,6 +181,15 @@ CREATE TABLE IF NOT EXISTS stock_moves (
 CREATE OR REPLACE FUNCTION fn_block_stock_write() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'stock_moves append-only'; END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_no_update_stock ON stock_moves;
 CREATE TRIGGER trg_no_update_stock BEFORE UPDATE OR DELETE ON stock_moves FOR EACH ROW EXECUTE FUNCTION fn_block_stock_write();
+CREATE TABLE IF NOT EXISTS suppliers (
+  id BIGSERIAL PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  phone TEXT NULL,
+  rating INTEGER DEFAULT 5 CHECK (rating BETWEEN 1 AND 5),
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS purchase_orders (
   id BIGSERIAL PRIMARY KEY,
   code TEXT UNIQUE NOT NULL,
@@ -190,15 +199,6 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   need_date DATE NULL,
   idempotency_key TEXT UNIQUE NULL,
   created_by BIGINT NULL,
-  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS suppliers (
-  id BIGSERIAL PRIMARY KEY,
-  code TEXT UNIQUE NOT NULL,
-  name TEXT NOT NULL,
-  phone TEXT NULL,
-  rating INTEGER DEFAULT 5 CHECK (rating BETWEEN 1 AND 5),
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -261,6 +261,20 @@ CREATE TABLE IF NOT EXISTS debts (
   CHECK ((type = 'receivable' AND customer_id IS NOT NULL) OR type = 'payable')
 );
 CREATE INDEX IF NOT EXISTS idx_debts_status_due ON debts(status, due_date);
+CREATE TABLE IF NOT EXISTS expenses (
+  id BIGSERIAL PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('payable','fee','salary','marketing','other')),
+  supplier_id BIGINT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+  amount BIGINT NOT NULL,
+  paid BIGINT DEFAULT 0 CHECK (paid >= 0),
+  due_date DATE NULL,
+  note TEXT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done')),
+  created_by BIGINT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS payments (
   id BIGSERIAL PRIMARY KEY,
   debt_id BIGINT NULL REFERENCES debts(id) ON DELETE RESTRICT,
@@ -278,20 +292,6 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE OR REPLACE FUNCTION fn_block_payments_write() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'payments append-only'; END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_no_update_payments ON payments;
 CREATE TRIGGER trg_no_update_payments BEFORE UPDATE OR DELETE ON payments FOR EACH ROW EXECUTE FUNCTION fn_block_payments_write();
-CREATE TABLE IF NOT EXISTS expenses (
-  id BIGSERIAL PRIMARY KEY,
-  code TEXT UNIQUE NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('payable','fee','salary','marketing','other')),
-  supplier_id BIGINT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
-  amount BIGINT NOT NULL,
-  paid BIGINT DEFAULT 0 CHECK (paid >= 0),
-  due_date DATE NULL,
-  note TEXT NULL,
-  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done')),
-  created_by BIGINT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
 CREATE TABLE IF NOT EXISTS budgets (
   id BIGSERIAL PRIMARY KEY,
   dept_code TEXT NOT NULL REFERENCES departments(code) ON DELETE RESTRICT,

@@ -2,11 +2,19 @@ node_modules/
 data/*.db*
 data/*.db-shm
 data/*.db-wal
+# DB/artifact o thu muc con (backend/data, ...)
+**/data/*.db*
+**/data/*.db-shm
+**/data/*.db-wal
 .env
 .env.local
 logs/
+**/logs/
 backups/
 coverage/
 dist/
 *.log
 .DS_Store
+
+# Download cu (Chrome chua hoan tat) — khong commit file .crdownload
+*.crdownload

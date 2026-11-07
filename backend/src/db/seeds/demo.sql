@@ -52,19 +52,19 @@ INSERT INTO customers(code,name,phone,type,owner_employee_id) VALUES
 ON CONFLICT(code) DO NOTHING;
 
 INSERT INTO campaigns(name,channel,cost,start_date,end_date) VALUES
-('Khai truong TikTok','tiktok',2000000,date('now','-10 days'),date('now','+20 days'));
+('Khai truong TikTok','tiktok',2000000,__D_m10__,__D_p20__);
 
 INSERT INTO leads(name,phone,source,campaign_id,stage,owner_employee_id,amount_expected,last_touch) VALUES
-('Anh Tuan','0931111111','tiktok',1,'new',4,5000000,date('now')),
-('Chi Hoa','0932222222','facebook',NULL,'mql',4,8000000,date('now','-1 day')),
-('Cong ty Binh Minh','0933333333','referral',NULL,'sql',5,50000000,date('now','-1 day')),
-('Shop Co Tu','0934444444','shopee',NULL,'won',5,10000000,date('now','-5 days'));
+('Anh Tuan','0931111111','tiktok',1,'new',4,5000000,__D_0__),
+('Chi Hoa','0932222222','facebook',NULL,'mql',4,8000000,__D_m1__),
+('Cong ty Binh Minh','0933333333','referral',NULL,'sql',5,50000000,__D_m1__),
+('Shop Co Tu','0934444444','shopee',NULL,'won',5,10000000,__D_m5__);
 
 INSERT INTO quotes(code,lead_id,customer_id,amount,status,valid_until) VALUES
-('BG001',4,2,10000000,'accepted',date('now','+15 days'));
+('BG001',4,2,10000000,'accepted',__D_p15__);
 
 INSERT INTO contracts(code,customer_id,quote_id,amount,status,signed_date) VALUES
-('HD001',2,1,10000000,'signed',date('now','-4 days'));
+('HD001',2,1,10000000,'signed',__D_m4__);
 
 INSERT INTO products(sku,name,price,cost,unit,stock_alert) VALUES
 ('CF-SUA-01','Ca phe sua',35000,18000,'ly',20),
@@ -76,8 +76,8 @@ INSERT INTO stock_moves(product_sku,type,qty,ref_code) VALUES
 ('CF-SUA-01','in',100,'TON-DAU'),('TRA-DAO-01','in',80,'TON-DAU'),('BANH-01','in',25,'TON-DAU');
 
 INSERT INTO orders(code,customer_id,contract_id,employee_id,amount,status,order_date) VALUES
-('DH001',1,NULL,4,5200000,'pending',date('now','-4 days')),
-('DH002',2,1,5,1850000,'pending',date('now','-3 days'));
+('DH001',1,NULL,4,5200000,'pending',__D_m4__),
+('DH002',2,1,5,1850000,'pending',__D_m3__);
 
 INSERT INTO order_items(order_id,product_sku,qty,price,cost) VALUES
 (1,'CF-SUA-01',50,35000,18000),(1,'BANH-01',20,25000,12000),
@@ -87,8 +87,8 @@ INSERT INTO stock_moves(product_sku,type,qty,ref_code) VALUES
 ('CF-SUA-01','out',-50,'DH001'),('BANH-01','out',-20,'DH001'),('TRA-DAO-01','out',-30,'DH002');
 
 INSERT INTO debts(customer_id,order_id,type,amount,paid,due_date,status) VALUES
-(1,1,'receivable',5200000,2000000,date('now','-1 day'),'open'),
-(2,2,'receivable',1850000,0,date('now','+2 days'),'open');
+(1,1,'receivable',5200000,2000000,__D_m1__,'open'),
+(2,2,'receivable',1850000,0,__D_p2__,'open');
 
 INSERT INTO payments(debt_id,order_id,amount,method,actor,note) VALUES
 (1,1,2000000,'bank','ketoan','Thu CK dot 1 DH001');
@@ -101,7 +101,7 @@ INSERT INTO suppliers(code,name,phone,rating) VALUES
 ON CONFLICT(code) DO NOTHING;
 
 INSERT INTO purchase_orders(code,supplier_id,amount,status,need_date) VALUES
-('PO001',1,12000000,'sent',date('now','+5 days'));
+('PO001',1,12000000,'sent',__D_p5__);
 
 INSERT INTO tickets(code,customer_id,category,subject,content,status,priority) VALUES
 ('TCK-0001',1,'easy','Hoi gio mo cua','Shop mo cua may gio?','open','low'),
@@ -110,24 +110,24 @@ INSERT INTO tickets(code,customer_id,category,subject,content,status,priority) V
 INSERT INTO ratings(customer_id,order_id,stars,comment) VALUES (1,1,5,'Rat ngon');
 
 INSERT INTO budgets(dept_code,month,planned,actual) VALUES
-('sales',strftime('%Y-%m','now'),200000000,50000000),
-('marketing',strftime('%Y-%m','now'),100000000,2000000),
-('ops',strftime('%Y-%m','now'),150000000,10000000);
+('sales',__YM__,200000000,50000000),
+('marketing',__YM__,100000000,2000000),
+('ops',__YM__,150000000,10000000);
 
 INSERT INTO approvals(ref_type,ref_id,requester,level,status) VALUES
 ('expense',1,20,'manager','pending');
 
 INSERT INTO expenses(code,type,amount,paid,due_date,note,status) VALUES
-('CP001','fee',8000000,0,date('now','+5 days'),'Tien nha thang nay','open');
+('CP001','fee',8000000,0,__D_p5__,'Tien nha thang nay','open');
 
 INSERT INTO it_incidents(code,title,severity,status) VALUES ('INC-001','May in bill ket noi cham','p3','open');
 INSERT INTO product_features(title,stage,owner) VALUES ('Combo sang sieu tiet kiem','testing',29);
 INSERT INTO risks(title,level,owner,status) VALUES ('No qua han tang cuoi thang','medium',18,'open');
-INSERT INTO sop_tasks(dept_code,title,owner,due_date,status) VALUES ('supply','Kiem ke kho cuoi tuan',16,date('now','+3 days'),'todo');
-INSERT INTO recruitments(position,dept_code,qty,status,opened_date,cost) VALUES ('Sales Executive','sales',2,'open',date('now'),5000000);
+INSERT INTO sop_tasks(dept_code,title,owner,due_date,status) VALUES ('supply','Kiem ke kho cuoi tuan',16,__D_p3__,'todo');
+INSERT INTO recruitments(position,dept_code,qty,status,opened_date,cost) VALUES ('Sales Executive','sales',2,'open',__D_0__,5000000);
 
 -- Audit seed cho I4 + giao dich matched cho I5 (DB moi seed lan dau):
-INSERT INTO transactions(trans_date,amount,content,bank_ref,matched_order_id,status) VALUES(date('now','-3 days'),2000000,'TT DH001 KH001','BANK-SEED-001',1,'matched') ON CONFLICT(bank_ref) DO NOTHING;
+INSERT INTO transactions(trans_date,amount,content,bank_ref,matched_order_id,status) VALUES(__D_m3__,2000000,'TT DH001 KH001','BANK-SEED-001',1,'matched') ON CONFLICT(bank_ref) DO NOTHING;
 INSERT INTO audit_log(actor,action,table_name,record_id,new_json) SELECT 'seed','create','payments',id,'{"seed":true}' FROM payments;
 INSERT INTO audit_log(actor,action,table_name,record_id,new_json) SELECT 'seed','create','stock_moves',id,'{"seed":true}' FROM stock_moves;
 INSERT INTO audit_log(actor,action,table_name,record_id,new_json) SELECT 'seed','create','debts',id,'{"seed":true}' FROM debts;

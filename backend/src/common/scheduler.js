@@ -26,12 +26,21 @@ function initScheduler() {
     } catch (e) { logger.error('cron sop fail', { msg: e.message }); }
   }, { timezone: 'Asia/Ho_Chi_Minh' });
 
-  cron.schedule('0 2 * * *', async () => {
-    execFile('bash', [path.join(__dirname, '..', '..', 'scripts/backup.sh')], (err, stdout, stderr) => {
-      if (err) logger.error('cron backup fail', { msg: err.message });
-      else logger.info('cron 2h: backup xong');
-    });
-  }, { timezone: 'Asia/Ho_Chi_Minh' });
+  // OPS-04: backup KHONG chay trong container backend nua.
+  // node:20-alpine khong co bash/pg_dump -> execFile('bash') fail ngay.
+  // Backup chay bang service rieng (`backup` trong docker-compose) tren
+  // image co tool, luu vao volume persistent. O day chi ghi log de nho.
+  if (process.env.BACKUP_IN_BACKEND === '1') {
+    cron.schedule('0 2 * * *', async () => {
+      execFile('bash', [path.join(__dirname, '..', '..', 'scripts/backup.sh')], (err, stdout, stderr) => {
+        if (err) logger.error('cron backup fail', { msg: err.message });
+        else logger.info('cron 2h: backup xong');
+      });
+    }, { timezone: 'Asia/Ho_Chi_Minh' });
+    logger.warn('scheduler: backup cron bat trong backend (BACKUP_IN_BACKEND=1)');
+  } else {
+    logger.info('scheduler: backup chay boi service rieng (docker-compose: backup)');
+  }
 
   cron.schedule('5 8 * * *', async () => {
     try {

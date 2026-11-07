@@ -60,7 +60,45 @@ ok(schedHits.length <= 1 && (schedHits.length === 0 || schedHits[0].endsWith('sc
 const openapi = read(path.join(ROOT, 'docs/contract/openapi.yaml'));
 for (const r of ['/api/auth/login', '/api/auth/refresh', '/api/auth/logout', '/api/auth/me', '/api/orders', '/api/payments', '/api/customers', '/api/cskh/chat']) ok(openapi.includes(r), 'openapi co ' + r);
 const trace = read(path.join(ROOT, 'docs/contract/traceability.csv'));
-for (const t of ['sales.test', 'convert.test', 'remind.test', 'finance.test', 'audit.test', 'approval.test']) ok(!trace.includes(t + '.js') || true, 'trace ' + t + ' (khuyen nghi doi ten file test cho khop)');
+// QA-01: truoc day check nay la "false-positive" (`|| true`) -> luon PASS,
+// khong bao gio bat duoc loi thuoc trace. Sua lai:
+//   (a) MOI file test ma trace tro toi phai ton tai that tren dia
+//       (backend/tests hoac agent_svc/tests).
+//   (b) trace phai day du: it nhat 10 file test duy nhat.
+const testsDirs = [path.join(ROOT, 'tests'), path.join(ROOT, '..', 'agent_svc', 'tests')];
+const scriptDirs = [
+  path.join(ROOT, 'scripts'),
+  path.join(ROOT, '..', 'agent_svc', 'scripts'),
+  path.join(ROOT, '..', 'storefront', 'scripts'),
+  path.join(ROOT, '..', 'scripts'),
+];
+const ciFile = path.join(ROOT, '..', '.github', 'workflows', 'ci.yml');
+const ciSrc = read(ciFile);
+// Lay danh sach job CI de validate cac dong trace tro toi CI stage.
+const ciJobs = new Set();
+for (const m of ciSrc.matchAll(/^  ([a-z0-9-]+):\s*$/gm)) ciJobs.add(m[1]);
+const traceRows = trace.split(/\r?\n/).filter((l) => l.trim() && !l.trim().startsWith('story,'));
+const traceTests = new Set();
+for (const row of traceRows) {
+  const cols = row.split(',');
+  const testCol = cols[cols.length - 2]; // cot "test" (truoc cot "ui")
+  if (!testCol) continue;
+  for (const f of testCol.split('|')) {
+    const name = f.trim();
+    if (name) traceTests.add(name);
+  }
+}
+for (const name of traceTests) {
+  if (name.endsWith('.test.js')) {
+    ok(testsDirs.some((d) => fs.existsSync(path.join(d, name))), 'trace tro toi file test ton tai: ' + name);
+  } else if (name.endsWith('.cjs') || name.endsWith('.js') || name.endsWith('.py')) {
+    ok(scriptDirs.some((d) => fs.existsSync(path.join(d, name))), 'trace tro toi script ton tai: ' + name);
+  } else {
+    // Ten CI stage / verify gate — phai xuat hien trong workflow CI.
+    ok(ciJobs.has(name) || /gate/i.test(name), 'trace tro toi CI stage ton tai: ' + name);
+  }
+}
+ok(traceTests.size >= 10, 'trace co it nhat 10 file test duy nhat (co ' + traceTests.size + ')');
 ok(trace.includes('order-stock-debt.test.js') && trace.includes('payments.test.js'), 'traceability khong vien dan file test khong ton tai');
 const srcAll = files.map(read).join('\n');
 const hasSrc = files.length > 0;
@@ -133,6 +171,94 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
   if (hits.length) console.log('SECRET-DEFAULT HITS:\n' + hits.join('\n'));
   void scanRoots;
   ok(hits.length === 0, 'khong con khoa mac dinh trong src/compose — SEC-02');
+})();
+
+// 11. STABILIZATION v8.0 — gate cho backlog da dong (TX-01..04, GOV-01/02,
+//     SEC-02..04, OPS-01/03, QA-01). Moi gate deu doc source THAT — khong
+//     dung co so dieu kien "luon true" (QA-01: verify phai that su fail
+//     khi contract vi pham).
+(function stabilizationGates() {
+  const dbSrc = read(path.join(ROOT, 'src/common/db.js'));
+  const authSrc = read(path.join(ROOT, 'src/common/auth.js'));
+  const auditSrc = read(path.join(ROOT, 'src/common/audit.js'));
+  const routesAuthSrc = read(path.join(ROOT, 'src/routes/auth.js'));
+  const serverSrc = read(path.join(ROOT, 'src/server.js'));
+  const secSrc = read(path.join(ROOT, 'src/common/security.js'));
+  const salesSrc = read(path.join(ROOT, 'src/modules/sales/service.js'));
+  const supplySrc = read(path.join(ROOT, 'src/modules/supply/service.js'));
+  const financeSrc = read(path.join(ROOT, 'src/modules/finance/service.js'));
+
+  // TX-01: transaction phai serialize tren SQLite (khoa + AsyncLocalStorage).
+  ok(/AsyncLocalStorage/.test(dbSrc) && /sqliteQueue/.test(dbSrc), 'TX-01: SQLite transaction serialize (queue + AsyncLocalStorage)');
+  // TX-02: stock guard phai khoa dong hang (FOR UPDATE) truoc khi ghi.
+  ok(/FOR UPDATE/i.test(dbSrc), 'TX-02/TX-03: DB adapter ho tro khoa dong hang (FOR UPDATE)');
+  ok(/readOnhand|lock\(/i.test(salesSrc) && /lock\(/i.test(supplySrc), 'TX-02: sales + supply khoa ton kho truoc khi ghi');
+  // TX-03: payment phai co conditional update (WHERE paid=?).
+  ok(/WHERE id=\? AND paid=\?/i.test(financeSrc), 'TX-03: payment cap nhat cong no co dieu kien (anti lost-update)');
+  // TX-04: idempotency — unique constraint + bat loi unique -> dedupe.
+  ok(/idempotency_key\s+TEXT\s+UNIQUE/i.test(migAll), 'TX-04: co UNIQUE constraint cho idempotency_key');
+  ok(/isUniqueViolation/.test(dbSrc), 'TX-04: adapter nhan dien loi UNIQUE (retry handling)');
+  // GOV-01: audit ghi trong cung transaction.
+  ok(/conn && typeof conn\.run === 'function'/.test(auditSrc), 'GOV-01: writeAudit dung conn trong transaction');
+  const auditOutside = [
+    read(path.join(ROOT, 'src/routes/hr.js')),
+    read(path.join(ROOT, 'src/routes/sales.js')),
+    read(path.join(ROOT, 'src/routes/gov-min.js')),
+  ].join('\n');
+  ok(!/writeAudit\(null/.test(auditOutside), 'GOV-01: khong con writeAudit ngoai transaction trong routes');
+  // GOV-02: audit_log append-only tren ca 2 dialect.
+  ok(/trg_no_update_audit/.test(migAll) && /trg_no_update_audit/.test(migPgAll), 'GOV-02: audit_log append-only (chan UPDATE/DELETE)');
+  // SEC-02: refresh rotation atomic + reuse detection.
+  ok(/IS NOT TRUE/i.test(authSrc), 'SEC-02: revoke refresh token bang dieu kien atomic (IS NOT TRUE)');
+  // SEC-03: proxy trust theo topology, khong tin XFF tu client.
+  ok(/trust proxy/i.test(serverSrc) || /trust proxy/i.test(secSrc), 'SEC-03: server dat trust proxy theo topology');
+  const secCode = secSrc.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  ok(/resolveTrustProxy/.test(secSrc) && !/app\.set\(\s*['"]trust proxy['"]\s*,\s*1\s*\)/.test(secCode), 'SEC-03: trust proxy khong hard-code =1 (theo TRUST_PROXY env)');
+  // SEC-04: cookie secure + httpOnly + sameSite.
+  ok(/httpOnly:\s*true/.test(routesAuthSrc) && /sameSite/i.test(routesAuthSrc), 'SEC-04: cookie httpOnly + sameSite');
+  ok(/secure:\s*isProd/.test(routesAuthSrc) && /NODE_ENV\s*===\s*['"]production['"]/.test(routesAuthSrc), 'SEC-04: cookie secure o production');
+  // OPS-03: readiness kiem tra DB that.
+  ok(/\/api\/ready/.test(serverSrc), 'OPS-03: co endpoint /api/ready');
+  ok(/SELECT 1/.test(serverSrc), 'OPS-03: readiness kiem tra ket noi DB');
+  // QA-01: verify khong con dieu kien "luon true" (false-positive).
+  const verifySrc = read(__filename);
+  ok(!/\|\|\s*true\s*\)/.test(verifySrc), 'QA-01: verify khong con dieu kien "|| true" (false-positive)');
+
+  // DB-01: KHONG duoc co forward FK trong migration PostgreSQL
+  // (bang tra tham chieu toi bang duoc tao sau -> "relation does not exist").
+  const order = [];
+  for (const ln of migPg.split('\n')) {
+    const m = ln.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/i);
+    if (m) order.push(m[1]);
+  }
+  let cur = null;
+  const fwd = [];
+  for (const ln of migPg.split('\n').map((l) => l.replace(/--.*$/, ''))) {
+    const cm = ln.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/i);
+    if (cm) { cur = cm[1]; continue; }
+    const rm = ln.match(/REFERENCES\s+"?(?:[a-zA-Z_]+\.)?([a-zA-Z_][a-zA-Z0-9_]*)"?/i);
+    if (rm && cur) {
+      const ti = order.indexOf(rm[1]);
+      const ci = order.indexOf(cur);
+      if (ti > ci) fwd.push(cur + ' -> ' + rm[1]);
+    }
+  }
+  ok(fwd.length === 0, 'DB-01: migration PG khong co forward FK' + (fwd.length ? ' (' + fwd.join(', ') + ')' : ''));
+
+  // QA-02/03/04: cac suite bat buoc phai ton tai (khong bi xoa nham).
+  for (const f of ['tx-concurrency.test.js', 'race-concurrency.test.js', 'security-regression.test.js']) {
+    ok(fs.existsSync(path.join(ROOT, 'tests', f)), 'QA-02/03/04: ton tai suite ' + f);
+  }
+  // QA-05: Compose phai co PostgreSQL + backup service + volume persistent.
+  const compose = read(path.join(ROOT, '..', 'docker-compose.yml'));
+  ok(/image:\s*postgres:15/.test(compose), 'QA-05: compose co PostgreSQL 15');
+  ok(/bizops-pgdata/.test(compose) && /bizops-backups/.test(compose), 'QA-05: compose co volume persistent (pgdata + backups)');
+  ok(/pg_isready/.test(compose), 'QA-05: compose co healthcheck pg_isready');
+  // WEB-01: Nginx storefront + frontend phai proxy /api.
+  const sfNginx = read(path.join(ROOT, '..', 'storefront', 'nginx.conf'));
+  const feNginx = read(path.join(ROOT, '..', 'frontend', 'nginx.conf'));
+  ok(/location\s+\/api\//.test(sfNginx) && /proxy_pass\s+http:\/\/backend:3000/.test(sfNginx), 'WEB-01: storefront nginx proxy /api -> backend');
+  ok(/location\s+\/api\//.test(feNginx) && /proxy_pass\s+http:\/\/backend:3000/.test(feNginx), 'WEB-01: frontend nginx proxy /api -> backend');
 })();
 
 console.log(fail === 0 ? '\nVERIFY: ALL PASS' : '\nVERIFY: ' + fail + ' FAIL');

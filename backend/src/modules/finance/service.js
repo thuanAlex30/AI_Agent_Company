@@ -6,35 +6,44 @@ const { norm, todayVN, sinceVN } = require('../../common/db');
 // Cap nhat trang thai don goi qua salesService.setOrderPaid (khong UPDATE truc tiep bang cua sales).
 
 function dbConn(conn, fallback) {
-  // conn (trong tx) co {query,get,run}; fallback la module db async
+  // conn (trong tx) co {query,get,run,lock}; fallback la module db async
   if (conn && typeof conn.get === 'function') return conn;
   return fallback;
 }
 
-async function createReceivable(conn, { customer_id, order_id = null, amount, due_date = null, created_by = null, note = null }) {
+// TX-03/GOV-01: moi thao tac ghi (payment, receivable, payable...) phai
+// chay trong MOT transaction de (a) co row lock (FOR UPDATE) chong race
+// so duoc cong no, va (b) audit ghi cung transaction (khong the tach).
+async function withTx(fn, conn) {
   const db = require('../../common/db');
-  const c = dbConn(conn, db);
-  if (!customer_id || !amount || amount <= 0) throw new AppError('VALIDATION', 'Receivable can customer_id + amount>0', 400);
-  const r = await c.run(
-    'INSERT INTO debts(customer_id,order_id,type,amount,paid,due_date,status,note,created_by) VALUES(?,?,?,?,?,?,\'open\',?,?)',
-    [customer_id, order_id, 'receivable', amount, 0, due_date || due7(), note, created_by]
-  );
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM debts WHERE customer_id=? AND order_id ' + (order_id ? '=?' : 'IS NULL') + ' ORDER BY id DESC LIMIT 1', order_id ? [customer_id, order_id] : [customer_id]))?.id;
-  await writeAudit(c, created_by || 'system', 'create', 'debts', id, null, { customer_id, order_id, amount });
-  return { id };
+  if (conn && typeof conn.run === 'function') return fn(conn);
+  return db.tx(fn);
+}
+
+async function createReceivable(conn, { customer_id, order_id = null, amount, due_date = null, created_by = null, note = null }) {
+  return withTx(async (c) => {
+    if (!customer_id || !amount || amount <= 0) throw new AppError('VALIDATION', 'Receivable can customer_id + amount>0', 400);
+    const r = await c.run(
+      'INSERT INTO debts(customer_id,order_id,type,amount,paid,due_date,status,note,created_by) VALUES(?,?,?,?,?,?,\'open\',?,?)',
+      [customer_id, order_id, 'receivable', amount, 0, due_date || due7(), note, created_by]
+    );
+    const id = r.lastInsertRowid || (await c.get('SELECT id FROM debts WHERE customer_id=? AND order_id ' + (order_id ? '=?' : 'IS NULL') + ' ORDER BY id DESC LIMIT 1', order_id ? [customer_id, order_id] : [customer_id]))?.id;
+    await writeAudit(c, created_by || 'system', 'create', 'debts', id, null, { customer_id, order_id, amount });
+    return { id };
+  }, conn);
 }
 
 async function createPayable(conn, { order_id = null, amount, due_date = null, created_by = null, note = null }) {
-  const db = require('../../common/db');
-  const c = dbConn(conn, db);
-  if (!amount || amount <= 0) throw new AppError('VALIDATION', 'Payable can amount>0', 400);
-  const r = await c.run(
-    'INSERT INTO debts(customer_id,order_id,type,amount,paid,due_date,status,note,created_by) VALUES(NULL,?,\'payable\',?,0,?,\'open\',?,?)',
-    [order_id, amount, due_date || due7(), note, created_by]
-  );
-  const id = r.lastInsertRowid || (await c.get('SELECT id FROM debts WHERE type=\'payable\' ORDER BY id DESC LIMIT 1'))?.id;
-  await writeAudit(c, created_by || 'system', 'create', 'debts', id, null, { order_id, amount });
-  return { id };
+  return withTx(async (c) => {
+    if (!amount || amount <= 0) throw new AppError('VALIDATION', 'Payable can amount>0', 400);
+    const r = await c.run(
+      'INSERT INTO debts(customer_id,order_id,type,amount,paid,due_date,status,note,created_by) VALUES(NULL,?,\'payable\',?,0,?,\'open\',?,?)',
+      [order_id, amount, due_date || due7(), note, created_by]
+    );
+    const id = r.lastInsertRowid || (await c.get('SELECT id FROM debts WHERE type=\'payable\' ORDER BY id DESC LIMIT 1'))?.id;
+    await writeAudit(c, created_by || 'system', 'create', 'debts', id, null, { order_id, amount });
+    return { id };
+  }, conn);
 }
 
 async function markDebtCancelled(conn, orderId, actor) {
@@ -54,27 +63,41 @@ function due7() {
 }
 
 async function recordPayment(conn, { debt_id = null, expense_id = null, order_id = null, amount, method, actor = null, note = null, idempotency_key = null }) {
-  const db = require('../../common/db');
-  const c = dbConn(conn, db);
+  return withTx(async (c) => {
   if ((debt_id && expense_id) || (!debt_id && !expense_id)) throw new AppError('VALIDATION', 'Payment phai gan dung 1 trong debt_id/expense_id', 400);
   if (!amount || amount === 0) throw new AppError('VALIDATION', 'amount khac 0', 400);
   if (!['cash', 'bank', 'ewallet'].includes(method)) throw new AppError('VALIDATION', 'method khong hop le', 400);
-  if (idempotency_key) {
-    const ex = await c.get('SELECT * FROM payments WHERE idempotency_key=?', [idempotency_key]);
-    if (ex) return { id: ex.id, deduped: true };
-  }
-  if (debt_id) {
-    const d = await c.get('SELECT * FROM debts WHERE id=?', [debt_id]);
-    if (!d) throw new AppError('NOT_FOUND', 'Khong tim thay cong no', 404);
-    const newPaid = Number(d.paid) + Number(amount);
-    if (newPaid < 0 || newPaid > Number(d.amount)) throw new AppError('VALIDATION', `Vuot remain (remain=${Number(d.amount) - Number(d.paid)})`, 400);
-    const r = await c.run(
-      'INSERT INTO payments(debt_id,order_id,amount,method,actor,note,idempotency_key) VALUES(?,?,?,?,?,?,?)',
-      [debt_id, order_id || d.order_id, amount, method, actor, note, idempotency_key]
-    );
+    if (idempotency_key) {
+      const ex = await c.get('SELECT * FROM payments WHERE idempotency_key=?', [idempotency_key]);
+      if (ex) return { id: ex.id, deduped: true };
+    }
+    if (debt_id) {
+      // TX-03: khoa dong cong no (FOR UPDATE tren PG). Hai payment song song
+      // cung 1 debt se phai cho nhau -> khong con "doc paid=0 roi ghi 140".
+      const d = await lockDebt(c, debt_id);
+      if (!d) throw new AppError('NOT_FOUND', 'Khong tim thay cong no', 404);
+      const newPaid = Number(d.paid) + Number(amount);
+      if (newPaid < 0 || newPaid > Number(d.amount)) throw new AppError('VALIDATION', `Vuot remain (remain=${Number(d.amount) - Number(d.paid)})`, 400);
+      let r;
+      try {
+        r = await c.run(
+          'INSERT INTO payments(debt_id,order_id,amount,method,actor,note,idempotency_key) VALUES(?,?,?,?,?,?,?)',
+          [debt_id, order_id || d.order_id, amount, method, actor, note, idempotency_key]
+        );
+      } catch (e) {
+        // TX-04: retry cung idempotency_key -> unique violation -> tra ban ghi cu.
+        if (idempotency_key && require('../../common/db').isUniqueViolation(e)) {
+          const dup = await c.get('SELECT * FROM payments WHERE idempotency_key=?', [idempotency_key]);
+          if (dup) return { id: dup.id, deduped: true };
+        }
+        throw e;
+      }
     const pid = r.lastInsertRowid || (await c.get('SELECT id FROM payments WHERE debt_id=? ORDER BY id DESC LIMIT 1', [debt_id]))?.id;
     const status = newPaid >= Number(d.amount) ? 'done' : d.status;
-    await c.run('UPDATE debts SET paid=?, status=? WHERE id=?', [newPaid, status, debt_id]);
+    // TX-03: UPDATE co dieu kien (WHERE paid=? cu) -> neu row dang bi doi
+    // boi giao dich khac thi changes=0 va ta rollback thay vi ghi de.
+    const up = await c.run('UPDATE debts SET paid=?, status=? WHERE id=? AND paid=?', [newPaid, status, debt_id, Number(d.paid)]);
+    if (Number(up?.changes || 0) === 0) throw new AppError('CONFLICT', 'Cong no vua bi cap nhat boi giao dich khac — thu lai', 409);
     await writeAudit(c, actor || 'system', 'create', 'payments', pid, null, { debt_id, amount, method });
     await writeAudit(c, actor || 'system', 'update', 'debts', debt_id, { paid: d.paid }, { paid: newPaid });
     // day trang thai don qua module sales (giu bien ownership)
@@ -87,20 +110,48 @@ async function recordPayment(conn, { debt_id = null, expense_id = null, order_id
     return { id: pid };
   }
   // expense leg
-  const e = await c.get('SELECT * FROM expenses WHERE id=?', [expense_id]);
+  const e = await lockExpense(c, expense_id);
   if (!e) throw new AppError('NOT_FOUND', 'Khong tim thay chi phi', 404);
   if (amount < 0) throw new AppError('VALIDATION', 'Chi phi khong hoan tien am', 400);
   constGateExpense(await c.get('SELECT * FROM approvals WHERE ref_type=\'expense\' AND ref_id=? AND status=\'approved\' ORDER BY id DESC LIMIT 1', [expense_id]), e);
   const newPaid = Number(e.paid) + Number(amount);
   if (newPaid > Number(e.amount)) throw new AppError('VALIDATION', 'Vuot tong chi phi', 400);
-  const r = await c.run(
-    'INSERT INTO payments(expense_id,amount,method,actor,note,idempotency_key) VALUES(?,?,?,?,?,?)',
-    [expense_id, amount, method, actor, note, idempotency_key]
-  );
+  let r;
+  try {
+    r = await c.run(
+      'INSERT INTO payments(expense_id,amount,method,actor,note,idempotency_key) VALUES(?,?,?,?,?,?)',
+      [expense_id, amount, method, actor, note, idempotency_key]
+    );
+  } catch (e) {
+    // TX-04: retry cung idempotency_key -> unique violation -> tra ban ghi cu.
+    if (idempotency_key && require('../../common/db').isUniqueViolation(e)) {
+      const dup = await c.get('SELECT * FROM payments WHERE idempotency_key=?', [idempotency_key]);
+      if (dup) return { id: dup.id, deduped: true };
+    }
+    throw e;
+  }
   const pid = r.lastInsertRowid || (await c.get('SELECT id FROM payments WHERE expense_id=? ORDER BY id DESC LIMIT 1', [expense_id]))?.id;
-  await c.run("UPDATE expenses SET paid=?, status=? WHERE id=?", [newPaid, newPaid >= Number(e.amount) ? 'done' : 'open', expense_id]);
+  const up = await c.run("UPDATE expenses SET paid=?, status=? WHERE id=? AND paid=?", [newPaid, newPaid >= Number(e.amount) ? 'done' : 'open', expense_id, Number(e.paid)]);
+  if (Number(up?.changes || 0) === 0) throw new AppError('CONFLICT', 'Chi phi vua bi cap nhat boi giao dich khac — thu lai', 409);
   await writeAudit(c, actor || 'system', 'create', 'payments', pid, null, { expense_id, amount, method });
   return { id: pid };
+  }, conn);
+}
+
+// TX-03: khoa dong cong no / chi phi de chong lost-update.
+async function lockDebt(c, debtId) {
+  if (typeof c.lock === 'function') {
+    const row = await c.lock('SELECT * FROM debts WHERE id=?', [debtId]);
+    if (row) return row;
+  }
+  return c.get('SELECT * FROM debts WHERE id=?', [debtId]);
+}
+async function lockExpense(c, expenseId) {
+  if (typeof c.lock === 'function') {
+    const row = await c.lock('SELECT * FROM expenses WHERE id=?', [expenseId]);
+    if (row) return row;
+  }
+  return c.get('SELECT * FROM expenses WHERE id=?', [expenseId]);
 }
 
 function constGateExpense(appr, e) {

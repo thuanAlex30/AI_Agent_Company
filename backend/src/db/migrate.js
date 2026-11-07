@@ -54,12 +54,43 @@ async function migrate() {
     db.close();
   }
 
-  // seed dev only
-  const { get } = require('../common/db');
-  const u = await get('SELECT COUNT(*) c FROM users');
-  const wantSeed = process.argv.includes('--seed') || (u && Number(u.c) === 0 && process.env.NODE_ENV !== 'production');
-  if (wantSeed) await seedDemo();
-  else console.log('Seed skipped (users exist or NODE_ENV=production).');
+  // --- Seed: CHI chay khi duoc yeu cau tuyet doi ---
+  // P0-02 / DB-02: truoc day seed tu chay khi DB rong o moi truong non-production.
+  // Quy tac moi: seed demo CHI chay bang lenh explicit (`npm run seed:demo`)
+  // hoac env ALLOW_AUTO_SEED=1 (chi dung o CI). Production: tuyet doi khong seed.
+  const explicit = process.argv.includes('--seed') || process.env.ALLOW_AUTO_SEED === '1';
+  const isProd = process.env.NODE_ENV === 'production';
+  if (isProd && explicit) {
+    console.warn('Seed skipped: production khong duoc auto-seed (nhung --seed da duoc truyen).');
+  } else if (explicit) {
+    const { get } = require('../common/db');
+    const u = await get('SELECT COUNT(*) c FROM users');
+    if (u && Number(u.c) === 0) {
+      await seedDemo();
+    } else {
+      console.log('Seed skipped (users exist - seed idempotent, khong ghi de du lieu cu).');
+    }
+  } else {
+    console.log('Seed skipped (chi chay bang `npm run seed:demo` hoac ALLOW_AUTO_SEED=1).');
+  }
+}
+
+// Tinh cac placeholder ngay trong JS (khong dung date('now') cua SQLite).
+// Ket qua la chuoi literal 'YYYY-MM-DD' / 'YYYY-MM' -> chay duoc tren ca 2 dialect.
+function seedDateValues() {
+  const tzVN = (d) => new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+  const shift = (offsetDays) => {
+    const v = tzVN(new Date());
+    v.setDate(v.getDate() + offsetDays);
+    return v.toISOString().slice(0, 10);
+  };
+  const map = { __YM__: tzVN(new Date()).toISOString().slice(0, 7) };
+  for (let i = 0; i <= 400; i++) {
+    map[`__D_m${i}__`] = shift(-i);
+    map[`__D_p${i}__`] = shift(i);
+  }
+  map.__D_0__ = shift(0);
+  return map;
 }
 
 async function seedDemo() {
@@ -68,6 +99,17 @@ async function seedDemo() {
   const adminHash = await bcrypt.hash('Admin@123', 10);
   const userHash = await bcrypt.hash('User@123', 10);
   sql = sql.replaceAll('__ADMIN_HASH__', adminHash).replaceAll('__USER_HASH__', userHash);
+
+  // Thay placeholder ngay bang chuoi literal ngay (dialect-agnostic cho PG va SQLite).
+  const dates = seedDateValues();
+  sql = sql.replace(/__D_[mp]?\d+__|__YM__/g, (tok) => {
+    if (!(tok in dates)) throw new Error('Seed placeholder khong xac dinh: ' + tok);
+    return "'" + dates[tok] + "'";
+  });
+  const leftover = sql.match(/__[A-Z0-9_]+__/g);
+  if (leftover) {
+    throw new Error('Seed con placeholder chua thay: ' + [...new Set(leftover)].join(', '));
+  }
 
   if (DIALECT === 'pg') {
     const { Pool } = require('pg');

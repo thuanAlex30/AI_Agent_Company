@@ -61,9 +61,12 @@ function req(method, path, body, headers = {}) {
   console.log('');
 
   const results = [];
+  let lookupToken = null;
   for (let i = 1; i <= ATTEMPTS; i++) {
     const r = await req('POST', '/api/public/orders', payload, { 'Idempotency-Key': key });
     const d = (r.body && r.body.data) || {};
+    // Token tra cuu chi duoc tra LAN DAU (don moi). Lan dedup khong tra (chong lo).
+    if (!d.deduped && d.lookup_token) lookupToken = d.lookup_token;
     results.push({ i, status: r.status, code: d.code, id: d.id, deduped: !!d.deduped });
     console.log(
       `  lan ${i}: HTTP ${r.status}  code=${d.code || '-'}  id=${d.id || '-'}  deduped=${d.deduped ? 'YES' : 'no'}` +
@@ -83,11 +86,17 @@ function req(method, path, body, headers = {}) {
   const pass = okStatuses && codes.length === 1 && ids.length === 1 && results.filter((r) => !r.deduped).length === 1;
   console.log('\n' + (pass ? 'PASS: 5 lan gui -> CHI 1 don duoc tao.' : 'FAIL: van co >1 don hoac loi HTTP.'));
 
-  // Don do tao (khong phai dedup) la don duy nhat -> xac nhan DB
+  // Don do tao (khong phai dedup) la don duy nhat -> xac nhan DB.
+  // Tra cuu yeu 2 yeu to (ma don + SĐT/email hoac X-Lookup-Token) — dung
+  // lookup_token tra ve luc tao don, neu khong co thi fallback sang ?contact=.
   const created = results.filter((r) => !r.deduped);
   if (created.length === 1 && created[0].code) {
-    const look = await req('GET', '/api/public/orders/' + created[0].code);
-    console.log('Xac nhan don trong DB:', JSON.stringify(look.body).slice(0, 200));
+    const headers = lookupToken ? { 'X-Lookup-Token': lookupToken } : {};
+    const look = await req('GET', '/api/public/orders/' + created[0].code + '?contact=0912345678', null, headers);
+    const okLookup = look.status === 200 && look.body && look.body.ok !== false;
+    console.log('Xac nhan don trong DB (GET /orders/:code):', okLookup ? 'OK' : 'FAIL ' + look.status,
+      JSON.stringify(look.body).slice(0, 200));
+    if (!okLookup) process.exitCode = 1;
   }
-  process.exit(pass ? 0 : 1);
+  process.exit(pass && !process.exitCode ? 0 : 1);
 })().catch((e) => { console.error('LOI:', e.message); process.exit(1); });

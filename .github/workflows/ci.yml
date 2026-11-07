@@ -1,5 +1,11 @@
 name: CI
 on: [push, pull_request]
+
+# QA-02/03/04/05 — gate v8.0:
+#   QA-02 PostgreSQL integration (migration + seed + test tren PG that)
+#   QA-03 Concurrency/race suite (oversell / overpayment / idempotency)
+#   QA-04 Security regression suite (scope, IDOR, refresh reuse, proxy, cookie)
+#   QA-05 Docker build + Compose smoke (service len + readiness + /api proxy)
 jobs:
   backend-sqlite:
     runs-on: ubuntu-latest
@@ -9,7 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: ${{ matrix.node }} }
+        with:
+          node-version: ${{ matrix.node }}
       - run: npm ci --no-audit --no-fund
         working-directory: backend
       - run: npm run migrate
@@ -41,7 +48,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: ${{ matrix.node }} }
+        with:
+          node-version: ${{ matrix.node }}
       - run: npm ci --no-audit --no-fund
         working-directory: backend
       - run: npm run migrate
@@ -80,7 +88,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: ${{ matrix.node }} }
+        with:
+          node-version: ${{ matrix.node }}
       - run: npm ci --no-audit --no-fund
         working-directory: agent_svc
       - run: npm test
@@ -94,7 +103,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 20
       - run: npm ci --no-audit --no-fund
         working-directory: frontend
       - run: npm run build
@@ -104,7 +114,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 20
       - run: npm ci --no-audit --no-fund
         working-directory: storefront
       - run: npm run build
@@ -132,7 +143,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 20
       - run: npm ci --no-audit --no-fund
         working-directory: backend
       - run: npm ci --no-audit --no-fund
@@ -171,3 +183,222 @@ jobs:
       - name: E2E idempotency (5 lan gui -> 1 don)
         working-directory: storefront
         run: node scripts/e2e-idempotency.cjs http://127.0.0.1:3000
+
+  # ---------------------------------------------------------------------
+  # WEB-02: Browser E2E checkout + lookup (Puppeteer qua origin storefront).
+  # Can Chrome — ubuntu runner co Chrome san, dung puppeteer-core voi
+  # CHROME_PATH tro vao binary tren runner.
+  # ---------------------------------------------------------------------
+  storefront-browser-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: bizops
+          POSTGRES_PASSWORD: bizops
+          POSTGRES_DB: bizops_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PG_HOST: localhost
+      PG_USER: bizops
+      PG_PASSWORD: bizops
+      PG_DB: bizops_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Cai Chrome cho Puppeteer
+        run: npx --yes @puppeteer/browsers install chrome@stable
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - run: npm ci --no-audit --no-fund
+        working-directory: storefront
+      - run: npm run migrate
+        working-directory: backend
+      - run: npm run seed:storefront
+        working-directory: backend
+      - name: Build + serve storefront (static server + /api proxy)
+        working-directory: storefront
+        env:
+          SERVE_PORT: 5174
+          API_TARGET: http://127.0.0.1:3000
+        run: |
+          npm run build
+          node scripts/serve-gzip.cjs &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:5174/ > /dev/null; then
+              echo "storefront san sang"; break
+            fi
+            sleep 1
+          done
+      - name: Start backend
+        working-directory: backend
+        env:
+          PORT: 3000
+          DISABLE_CRON: 1
+        run: |
+          node src/server.js &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/api/ready > /dev/null; then
+              echo "backend san sang"; exit 0
+            fi
+            sleep 1
+          done
+          echo "backend khong khoi dong"; exit 1
+      - name: Browser E2E (checkout + lookup + idempotency)
+        working-directory: storefront
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node scripts/e2e-browser.cjs http://127.0.0.1:5174
+
+  # ---------------------------------------------------------------------
+  # QA-02: PostgreSQL integration suite — chay rieng tren PostgreSQL that
+  # (khong phai SQLite) de chan regression cross-dialect (Boolean, DATE,
+  # RETURNING id, FK forward, seed).
+  # ---------------------------------------------------------------------
+  pg-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: bizops
+          POSTGRES_PASSWORD: bizops
+          POSTGRES_DB: bizops_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PG_HOST: localhost
+      PG_USER: bizops
+      PG_PASSWORD: bizops
+      PG_DB: bizops_test
+      DATABASE_PATH: './data/bizops-test.db'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - name: Migration tren DB trong (PG-MIG-001)
+        working-directory: backend
+        run: node src/db/migrate.js
+      - name: Migration chay lai 2 lan — idempotent (khong doi schema)
+        working-directory: backend
+        run: node src/db/migrate.js
+      - name: Seed PostgreSQL (PG-SEED-001)
+        working-directory: backend
+        run: ALLOW_AUTO_SEED=1 node src/db/migrate.js --seed
+      - name: Seed lai — idempotent
+        working-directory: backend
+        run: ALLOW_AUTO_SEED=1 node src/db/migrate.js --seed
+      - name: Kiem tra FK day du trong catalog (DB-01)
+        working-directory: backend
+        run: node ../scripts/audit-pg-fk.cjs src/db/migrations/001_init.postgres.sql
+      - name: Verify contract gates
+        working-directory: backend
+        run: node scripts/verify.js
+      - name: Test suite tren PostgreSQL
+        working-directory: backend
+        run: npm test
+
+  # ---------------------------------------------------------------------
+  # QA-03: Concurrency / race suite — oversell, overpayment, idempotency.
+  # Chay RIENG (khong chay song song voi suite khac) de do lai race that.
+  # ---------------------------------------------------------------------
+  race-concurrency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - run: npm run migrate
+        working-directory: backend
+      - name: TX-01/TX-04 (serialize transaction + insert ID)
+        working-directory: backend
+        run: node --test --test-concurrency=1 tests/tx-concurrency.test.js
+      - name: TX-02/TX-03/TX-04 (stock, payment, idempotency race)
+        working-directory: backend
+        run: node --test --test-concurrency=1 tests/race-concurrency.test.js
+
+  # ---------------------------------------------------------------------
+  # QA-04: Security regression suite — RBAC scope, IDOR, refresh reuse,
+  # proxy spoof, cookie attributes.
+  # ---------------------------------------------------------------------
+  security-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - run: npm run migrate
+        working-directory: backend
+      - name: SEC-01..04 regression
+        working-directory: backend
+        run: node --test --test-concurrency=1 tests/security-regression.test.js
+      - name: RBAC scope suite
+        working-directory: backend
+        run: node --test --test-concurrency=1 tests/rbac.test.js
+
+  # ---------------------------------------------------------------------
+  # QA-05: Docker build + Compose smoke — build moi image, dung compose,
+  # kiem tra service len + readiness + /api proxy qua Nginx.
+  # ---------------------------------------------------------------------
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tao file env cho compose
+        run: |
+          cat > .env <<'EOF'
+          PG_PASSWORD=bizops
+          JWT_SECRET=ci-smoke-secret-32-chars-minimum-long
+          AGENT_INTERNAL_KEY=ci-smoke-internal-key-32-chars-long
+          AGENT_PUBLIC_KEY=ci-smoke-public-key-32-chars-long
+          WEBHOOK_SECRET=ci-smoke-webhook-secret-32-chars-long
+          CORS_ORIGIN=http://localhost:5173,http://localhost:5174
+          EOF
+      - name: Build image backend + storefront (Docker build xanh)
+        run: docker compose build backend storefront
+      - name: Dung PostgreSQL + backend (Compose smoke)
+        run: |
+          docker compose up -d postgres
+          for i in $(seq 1 30); do
+            if docker compose exec -T postgres pg_isready -U bizops -d bizops > /dev/null 2>&1; then
+              echo "postgres san sang"; break
+            fi
+            sleep 2
+          done
+          docker compose run --rm migrate
+          docker compose up -d backend
+      - name: Readiness phai 200 (OPS-03)
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/ready || true)
+            if [ "$code" = "200" ]; then
+              echo "readiness OK"; exit 0
+            fi
+            sleep 2
+          done
+          echo "readiness khong bao 200 sau 60s"; docker compose logs backend; exit 1
+      - name: Docker compose down
+        if: always()
+        run: docker compose down -v
+

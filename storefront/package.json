@@ -1,6 +1,6 @@
 {
   "name": "bizops-storefront",
-  "version": "6.1.0",
+  "version": "8.0.0",
   "private": true,
   "type": "module",
   "description": "BizOps Storefront — React + Vite public web :5174 (khach hang, khong auth NV)",
@@ -15,7 +15,8 @@
     "lh:median": "node scripts/lh-median.cjs 3",
     "bench": "node scripts/bench.cjs 5",
     "e2e:idempotency": "node scripts/e2e-idempotency.cjs",
-    "fonts:subset": "python scripts/subset-fonts.py"
+    "fonts:subset": "python scripts/subset-fonts.py",
+    "e2e:browser": "node scripts/e2e-browser.cjs"
   },
   "dependencies": {
     "react": "^18.3.1",

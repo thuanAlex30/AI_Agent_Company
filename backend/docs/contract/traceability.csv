@@ -32,3 +32,23 @@ US-STOREFRONT-02,POST /api/public/service-requests,"service_requests,customers,t
 US-STOREFRONT-03,GET /api/public/orders/:code,"orders,debts,shipments,order_lookup_tokens",public-write.test.js,storefront-tra-cuu
 US-STOREFRONT-03,POST /api/public/payments/webhook,"pay_webhook_logs,payments,debts,transactions",public-write.test.js,storefront-thanh-toan
 US-STOREFRONT-04,POST /api/public/chat,"messages,tickets",public-chat.test.js,storefront-chat
+US-STAB-TX-01,DB adapter tra ID dung cua record vua ghi (RETURNING id / lastInsertRowid),"orders,customers,stock_moves",tx-concurrency.test.js,tab-all
+US-STAB-TX-02,Serialize transaction SQLite chong cross-request contamination + khoa ton kho chong oversell,stock_moves+orders+debts,tx-concurrency.test.js|race-concurrency.test.js,tab-all
+US-STAB-TX-03,Payment atomic — chong overpayment / double-credit cong no,"debts,payments",race-concurrency.test.js,tab-finance
+US-STAB-TX-04,Idempotency-Key — retry khong ghi trung du lieu,"orders,payments,stock_moves",race-concurrency.test.js,tab-all
+US-STAB-SEC-01,RBAC scope theo phong ban + chong IDOR (server-side),"employees,recruitments,debits",security-regression.test.js|rbac.test.js,tab-all
+US-STAB-SEC-02,Atomic refresh-token rotation + reuse detection,refresh_tokens+users,security-regression.test.js,tab-all
+US-STAB-SEC-03,Proxy trust — khong tin X-Forwarded-For tu client,server-middleware,security-regression.test.js,tab-all
+US-STAB-SEC-04,Cookie secure + httpOnly + sameSite trong production,auth-sessions,security-regression.test.js,tab-all
+US-STAB-OPS-01,Healthcheck readiness/lsiness + Docker compose PostgreSQL 15,system,avail01.test.js,tab-all
+US-STAB-GOV-01,Audit ghi trong CUNG transaction voi mutation (fail -> rollback),audit_log+business-tables,audit.test.js,tab-legal
+US-STAB-GOV-02,Audit append-only + phan quyen DB rieng cho audit_log,audit_log,audit.test.js,tab-legal
+US-STAB-WEB-01,Reverse proxy /api -> backend tren Nginx (storefront + frontend),system,verify-gate,storefront-all
+US-STAB-WEB-02,Browser E2E checkout + lookup + idempotency tren origin storefront,"orders,customers,stock_moves",e2e-browser.cjs,storefront-thanh-toan-tra-cuu
+US-STAB-QA-01,Verify khong con false-positive (|| true) + trace tro toi file test ton tai,traceability.csv,verify-gate,tab-all
+US-STAB-QA-02,PostgreSQL integration suite — migrate x2 + seed x2 + test tren PG that,system,pg-integration,tab-all
+US-STAB-QA-03,Concurrency/race suite chay RIENG trong CI,system,race-concurrency.test.js,tab-all
+US-STAB-QA-04,Security regression suite chay RIENG trong CI,system,security-regression.test.js,tab-all
+US-STAB-QA-05,Docker build + Compose smoke (service len, readiness 200),system,docker-smoke,tab-all
+US-STAB-DX-01,Version 8.0.0 thong nhat + README kien truc v8,package.json,verify-gate,tab-all
+US-STAB-DX-02,Archive lab/debug artifacts + legacy root app (source tree sach),archive/,verify-gate,tab-all

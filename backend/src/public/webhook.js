@@ -27,7 +27,7 @@ async function logRejected({ provider, bankRef, payloadHash, note }) {
     const { run } = require('../common/db');
     await run(
       'INSERT INTO pay_webhook_logs(provider,bank_ref,payload_hash,signature_ok,processed_at,note) VALUES(?,?,?,?,?,?) ON CONFLICT(bank_ref) DO NOTHING',
-      [String(provider || 'vietqr').slice(0, 20), String(bankRef || `rej-${Date.now()}-${Math.floor(Math.random() * 1e6)}`), String(payloadHash || ''), 0, null, String(note || '').slice(0, 300)]
+      [String(provider || 'vietqr').slice(0, 20), String(bankRef || `rej-${Date.now()}-${Math.floor(Math.random() * 1e6)}`), String(payloadHash || ''), false, null, String(note || '').slice(0, 300)]
     );
   } catch {}
 }
@@ -82,7 +82,7 @@ router.post('/payments/webhook', webhookLimiter, async (req, res) => {
       }
       await c.run(
         'INSERT INTO pay_webhook_logs(provider,bank_ref,payload_hash,signature_ok,processed_at,note) VALUES(?,?,?,?,?,?) ON CONFLICT(bank_ref) DO NOTHING',
-        [String(provider || 'vietqr').slice(0, 20), String(bank_ref), payloadHash, 1, null, `order=${order.code} amount=${amount}`]
+        [String(provider || 'vietqr').slice(0, 20), String(bank_ref), payloadHash, true, null, `order=${order.code} amount=${amount}`]
       );
       const financeService = require('../modules/finance/service');
       const method = ['cash', 'bank', 'ewallet'].includes(payload.method) ? payload.method : 'bank';
@@ -97,7 +97,7 @@ router.post('/payments/webhook', webhookLimiter, async (req, res) => {
         );
         await c.run("UPDATE transactions SET status='matched', matched_order_id=? WHERE bank_ref=?", [order.id, String(bank_ref)]);
       } catch {}
-      await c.run('UPDATE pay_webhook_logs SET processed_at=?, signature_ok=1 WHERE bank_ref=?', [nowISO(), String(bank_ref)]);
+      await c.run('UPDATE pay_webhook_logs SET processed_at=?, signature_ok=TRUE WHERE bank_ref=?', [nowISO(), String(bank_ref)]);
       const { writeAudit } = require('../common/audit');
       await writeAudit(c, 'webhook', 'create', 'pay_webhook_logs', order.id, null, { bank_ref, order: order.code, amount });
       return { order_code: order.code, status: 'paid-recorded', payment_id: pay.id, deduped: !!pay.deduped };

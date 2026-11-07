@@ -25,3 +25,41 @@ test('audit2: audit_log append-only (cam UPDATE/DELETE)', async () => {
   await assert.rejects(() => run(`UPDATE audit_log SET action='x' WHERE id=${row.id}`));
   await assert.rejects(() => run(`DELETE FROM audit_log WHERE id=${row.id}`));
 });
+
+// --- GOV-01 / AUDIT-ATOMIC-001 ---------------------------------------------
+// Audit insert that FAIL (record_id NULL -> NOT NULL constraint) phai lam
+// rollback TOAN BO mutation nghiep vu trong cung transaction.
+// Neu mutation van commit -> bang chung audit co the bi "bo reu" -> vi pham.
+test('gov01: audit insert fail -> mutation nghiep vu phai rollback', async () => {
+  const { run: dbRun } = require('../src/common/db');
+  const code = 'GOV01-' + Date.now();
+  let threw = false;
+  await assert.rejects(
+    () => tx(async (conn) => {
+      await conn.run('INSERT INTO customers(code,name,phone,type) VALUES(?,?,?,?)', [code, 'GOV01', '0900000000', 'retail']);
+      // record_id = null -> audit_log.record_id NOT NULL -> insert that -> rollback
+      await writeAudit(conn, 'admin', 'create', 'customers', null, null, { code });
+    }),
+    (e) => { threw = true; return true; }
+  );
+  assert.ok(threw, 'transaction phai throw khi audit insert that');
+  const row = await get('SELECT id FROM customers WHERE code=?', [code]);
+  assert.equal(row, null, 'mutation nghiep vu phai bi rollback khi audit that');
+});
+
+// --- GOV-01: audit ghi trong CUNG transaction voi mutation --------------------
+// Service co ghi audit qua conn (khong phai module-level run()).
+test('gov01: mutation + audit commit cung nhau', async () => {
+  const { run: dbRun } = require('../src/common/db');
+  const code = 'GOV01OK-' + Date.now();
+  await tx(async (conn) => {
+    const r = await conn.run('INSERT INTO customers(code,name,phone,type) VALUES(?,?,?,?)', [code, 'GOV01 OK', '0900000001', 'retail']);
+    await writeAudit(conn, 'admin', 'create', 'customers', r.lastInsertRowid, null, { code });
+  });
+  const cust = await get('SELECT id FROM customers WHERE code=?', [code]);
+  assert.ok(cust, 'mutation phai commit');
+  const aud = await get('SELECT * FROM audit_log WHERE table_name=? AND record_id=?', ['customers', cust.id]);
+  assert.ok(aud, 'audit phai commit cung mutation');
+  assert.equal(aud.actor, 'admin');
+  assert.equal(aud.action, 'create');
+});

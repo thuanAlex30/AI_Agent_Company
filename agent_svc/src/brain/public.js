@@ -71,7 +71,7 @@ function extractOrderCode(s) {
 
 async function publicMenu(c) {
   try {
-    const rows = await c.query('SELECT sku, name, price, is_combo FROM products WHERE COALESCE(is_published,1)=1 ORDER BY sort_order, name LIMIT 8');
+    const rows = await c.query('SELECT sku, name, price, is_combo FROM products WHERE COALESCE(is_published, TRUE) IS TRUE ORDER BY sort_order, name LIMIT 8');
     const labels = [];
     for (const r of rows.slice(0, 5)) {
       let stock = 0;
@@ -131,7 +131,7 @@ async function publicChatReply(conn, { message, contact = null, lookup_token = n
 
   // 0b. Doi giam 50%/qua trai phep -> tu choi + neu promo hien co (khong ticket, khong hua)
   if (/(giam\s*50|giam nua|tang qua|tang kem|mien phi.*tang|uu dai khung)/.test(n) && /(cho|di|nhe|di ma|cho em|xin)/.test(n)) {
-    const promoRow = await c.get("SELECT title FROM promotions WHERE COALESCE(is_active,1)=1 ORDER BY id DESC LIMIT 1").catch(() => null);
+    const promoRow = await c.get("SELECT title FROM promotions WHERE COALESCE(is_active, TRUE) IS TRUE ORDER BY id DESC LIMIT 1").catch(() => null);
     const promoTxt = promoRow?.title ? ` Chương trình hiện có: ${promoRow.title}.` : ' Chương trình hiện có xem tại mục Ưu đãi ạ.';
     const replyD = `Dạ em không áp giảm riêng ngoài chương trình công bố ạ.${promoTxt}`;
     await logPub(c, { contentIn: message, contentOut: replyD, ms: Date.now() - t0 });

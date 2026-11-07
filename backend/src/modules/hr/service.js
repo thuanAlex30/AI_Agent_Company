@@ -70,8 +70,11 @@ async function payrollPreview(conn, reqUser, month) {
   const db = require('../../common/db');
   const c = (conn && conn.run) ? conn : db;
   const m = month || todayVN().slice(0, 7);
+  // DB-05: work_date la kieu DATE. SQLite substr(DATE,1,7) hoat dong nhung
+  // PostgreSQL thi loi (date khong phai text). CAST(... AS TEXT) cho ra
+  // 'YYYY-MM-DD' o ca hai dialect -> substr(... ,1,7) ra 'YYYY-MM'.
   const rows = await c.query(
-    "SELECT e.code AS employee_code, e.name, e.dept_code, e.salary_base, COUNT(CASE WHEN a.status IN ('present','late') THEN 1 END) AS present_days FROM employees e LEFT JOIN attendance a ON a.employee_id=e.id AND substr(a.work_date,1,7)=? WHERE e.status IN ('active','probation') GROUP BY e.id ORDER BY e.code",
+    "SELECT e.code AS employee_code, e.name, e.dept_code, e.salary_base, COUNT(CASE WHEN a.status IN ('present','late') THEN 1 END) AS present_days FROM employees e LEFT JOIN attendance a ON a.employee_id=e.id AND substr(CAST(a.work_date AS TEXT),1,7)=? WHERE e.status IN ('active','probation') GROUP BY e.id ORDER BY e.code",
     [m]
   );
   return rows.map((r) => {

@@ -96,7 +96,8 @@ Cách sửa (W3C `css-fonts-4`): khai báo `@font-face` cho fallback `BVP Fallba
 thật** → khi swap xong vùng paint nhỏ lại → không có ứng viên lớn hơn → **Chrome không
 ghi lại LCP**.
 
-Giá trị `size-adjust` được đo bằng DOM thật (`scripts/font-fit.cjs`), không đoán:
+Giá trị `size-adjust` được đo bằng DOM thật (`scripts/font-fit.cjs`, đã chuyển
+sang `../archive/storefront-lab-scripts/`), không đoán:
 weight 400 → `93.53%`, weight 700 → `113.92%`.
 
 ### 4.2 CSS được inline, không tải song song
@@ -149,4 +150,5 @@ Bảng màu hiện là nâu cà phê (quán cà phê / F&B). Đổi sang ngành 
 - **Bắt buộc**: nếu `--accent-600` làm nền nút có chữ trắng, đảm bảo tương phản
   ≥ 4,5:1 (hiện `#B25213` đạt 5,07:1 — `#D9651F` chỉ đạt 3,6:1 và đã bị loại).
 - `--font`: font tự host; nếu đổi font, chạy lại `npm run fonts:subset` và cập
-  nhật `size-adjust` trong `styles/fonts.css` bằng `scripts/font-fit.cjs`.
+  nhật `size-adjust` trong `styles/fonts.css` bằng `scripts/font-fit.cjs`
+  (script đo này nằm ở `../archive/storefront-lab-scripts/font-fit.cjs`).

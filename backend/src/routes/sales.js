@@ -3,6 +3,7 @@ const { authenticate, requirePerm } = require('../common/auth');
 const { ok, fail, AppError } = require('../common/errors');
 const { get, all, run, tx } = require('../common/db');
 const { reqStr, reqIntPos, reqCode } = require('../common/validate');
+const { scopeFilter, assertResourceScope, enforceDept } = require('../common/scope');
 const salesService = require('../modules/sales/service');
 
 const router = express.Router();
@@ -19,11 +20,15 @@ router.post('/customers', requirePerm('customers.write'), async (req, res) => {
     const name = reqStr(req.body, 'name', { max: 200 });
     const phone = reqStr(req.body, 'phone', { optional: true, max: 20 });
     const type = reqStr(req.body, 'type', { optional: true, enum: ['retail', 'wholesale', 'enterprise'] }) || 'retail';
-    const r = await run('INSERT INTO customers(code,name,phone,type) VALUES(?,?,?,?)', [code, name, phone || null, type]);
-    const id = r.lastInsertRowid || (await get('SELECT id FROM customers WHERE code=?', [code]))?.id;
     const { writeAudit } = require('../common/audit');
-    await writeAudit(null, req.user.username, 'create', 'customers', id, null, { code, name });
-    return ok(res, { id, code });
+    // GOV-01: ghi du lieu + audit trong CUNG transaction.
+    const out = await tx(async (c) => {
+      const r = await c.run('INSERT INTO customers(code,name,phone,type) VALUES(?,?,?,?)', [code, name, phone || null, type]);
+      const id = r.lastInsertRowid || (await c.get('SELECT id FROM customers WHERE code=?', [code]))?.id;
+      await writeAudit(c, req.user.username, 'create', 'customers', id, null, { code, name });
+      return { id, code };
+    });
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 router.get('/customers/:id', requirePerm('orders.read'), async (req, res) => {

@@ -26,9 +26,37 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 applySecurity(app);
 // Backend API-only (Frontend React chay rieng port 5173, proxy qua CORS + cookie).
+// ERP noi bo dung apiLimiter (300/15p/IP). apiLimiter BO QUA /api/public.
+// Storefront public co limiter rieng trong `public/limiters.js` (bucket rieng,
+// khoa theo IP+signature) — khach dung chung wifi van khong bi 429.
 app.use('/api/', apiLimiter);
 
-app.get('/api/health', (req, res) => ok(res, { status: 'up', service: 'backend', version: '6.1.0', time: new Date().toISOString() }));
+// --- OPS-03: health endpoints ------------------------------------------------
+// Liveness (/api/health): process con song -> luon 200. dung cho container restart.
+// Readiness (/api/ready): process + DB (va dependency) san sang -> 503 neu DB loi.
+// Healthcheck cu compose phai dung /api/ready de orchestrator khong coi
+// service "san sang" khi DB chua san sang.
+app.get('/api/health', (req, res) => ok(res, { status: 'up', service: 'backend', version: '8.0.0', time: new Date().toISOString() }));
+app.get('/api/ready', async (req, res) => {
+  const { get, DIALECT } = require('./common/db');
+  const checks = { db: false, dialect: DIALECT };
+  try {
+    await get('SELECT 1 AS ok');
+    checks.db = true;
+  } catch (e) {
+    checks.db = false;
+    checks.dbError = e.message;
+  }
+  const ready = checks.db;
+  return res.status(ready ? 200 : 503).json({
+    ok: ready,
+    status: ready ? 'ready' : 'not_ready',
+    service: 'backend',
+    version: '8.0.0',
+    checks,
+    time: new Date().toISOString(),
+  });
+});
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 // Public storefront truoc (khong auth NV) — phai mount truoc cac router authenticate
 app.use('/api/public', publicCatalog);

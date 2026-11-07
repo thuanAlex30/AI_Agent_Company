@@ -9,6 +9,18 @@ async function withTx(fn, conn) {
   return db.tx(fn);
 }
 
+// TX-02: doc ton kho co khoa dong hang theo SKU (chi tiet: supply/service.js).
+//   - Buoc 1: khoa ROW product (FOR UPDATE tren PG) -> mutex theo SKU.
+//   - Buoc 2: cong stock_moves (append-only).
+//   - SQLite: tx serialize toan bo (TX-01) -> doc+ghi trong cung tx van atomic.
+async function readOnhand(c, sku) {
+  if (typeof c.lock === 'function') {
+    await c.lock('SELECT sku FROM products WHERE sku=?', [sku]);
+  }
+  const row = await c.get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [sku]);
+  return Number(row?.s || 0);
+}
+
 async function createOrder(conn, { code, customer_id, items, employee_id = null, created_by = null, idempotency_key = null, contract_id = null }) {
   return withTx(async (c) => {
     if (!code || !customer_id || !Array.isArray(items) || items.length === 0) {
@@ -21,12 +33,25 @@ async function createOrder(conn, { code, customer_id, items, employee_id = null,
     const cust = await c.get('SELECT * FROM customers WHERE id=?', [customer_id]);
     if (!cust) throw new AppError('NOT_FOUND', 'Khong tim thay khach hang', 404);
     let amount = 0;
-    for (const it of items) {
+    // TX-02: khoa tat ca SKU theo thu tu alphabet de tranh deadlock khi
+    // 2 don cung chay song song (PG: SELECT ... FOR UPDATE).
+    // Ton kho da dung cho SKU trong chinh don nay phai duoc truong truoc
+    // (truong hop 1 SKU xuat hien nhieu dong trong items).
+    const sorted = [...items].sort((a, b) => String(a.sku).localeCompare(String(b.sku)));
+    const reserved = new Map();
+    for (const it of sorted) {
       const p = await c.get('SELECT * FROM products WHERE sku=?', [it.sku]);
       if (!p) throw new AppError('NOT_FOUND', `Khong tim thay SKU ${it.sku}`, 404);
       if (!it.qty || it.qty <= 0) throw new AppError('VALIDATION', 'qty phai > 0', 400);
-      const onhand = (await c.get('SELECT COALESCE(SUM(qty),0) s FROM stock_moves WHERE product_sku=?', [it.sku]))?.s || 0;
-      if (Number(onhand) < Number(it.qty)) throw new AppError('STOCK_SHORTAGE', `Kho khong du ${it.sku} (ton ${onhand})`, 409);
+      // TX-02: ton kho phai duoc kiem tra + ghi trong cung transaction,
+      // kem khoa dong hang theo SKU de tranh oversell khi 2 don cung chay
+      // song song (ca 2 deu thay ton du truoc khi ghi).
+      const onhand = await readOnhand(c, it.sku);
+      const already = Number(reserved.get(it.sku) || 0);
+      if (Number(onhand) - already < Number(it.qty)) {
+        throw new AppError('STOCK_SHORTAGE', `Kho khong du ${it.sku} (ton ${onhand})`, 409);
+      }
+      reserved.set(it.sku, already + Number(it.qty));
       amount += Number(p.price) * Number(it.qty);
     }
     if (amount <= 0) throw new AppError('VALIDATION', 'amount phai > 0', 400);
@@ -41,10 +66,22 @@ async function createOrder(conn, { code, customer_id, items, employee_id = null,
       status = 'pending_approval';
     }
     const { todayVN } = require('../../common/db');
-    const r = await c.run(
-      'INSERT INTO orders(code,customer_id,contract_id,employee_id,amount,status,order_date,created_by,idempotency_key) VALUES(?,?,?,?,?,?,?, ?,?)',
-      [code, customer_id, contract_id, employee_id, amount, status, todayVN(), created_by, idempotency_key]
-    );
+    // TX-04: 2 request cung idempotency_key chay song song deu qua CHECK
+    // o tren (SELECT) -> ca 2 cung INSERT -> 1 bi loi UNIQUE.
+    // Bat loi unique -> tra ve ban ghi da ton tai (idempotent retry).
+    let r;
+    try {
+      r = await c.run(
+        'INSERT INTO orders(code,customer_id,contract_id,employee_id,amount,status,order_date,created_by,idempotency_key) VALUES(?,?,?,?,?,?,?, ?,?)',
+        [code, customer_id, contract_id, employee_id, amount, status, todayVN(), created_by, idempotency_key]
+      );
+    } catch (e) {
+      if (idempotency_key && require('../../common/db').isUniqueViolation(e)) {
+        const dup = await c.get('SELECT * FROM orders WHERE idempotency_key=?', [idempotency_key]);
+        if (dup) return { id: dup.id, amount: Number(dup.amount), status: dup.status, deduped: true };
+      }
+      throw e;
+    }
     const orderId = r.lastInsertRowid || (await c.get('SELECT id FROM orders WHERE code=?', [code]))?.id;
     for (const it of items) {
       const p = await c.get('SELECT price, cost FROM products WHERE sku=?', [it.sku]);

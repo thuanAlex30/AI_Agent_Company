@@ -31,7 +31,28 @@ const internalLimiter = rateLimit({
   keyGenerator: (req) => String(req.headers['x-agent-key'] || 'unknown').slice(0, 64),
 });
 
-app.get('/health', (req, res) => ok(res, { status: 'up', service: 'agent_svc', version: '6.1.0', time: new Date().toISOString() }));
+app.get('/health', (req, res) => ok(res, { status: 'up', service: 'agent_svc', version: '8.0.0', time: new Date().toISOString() }));
+// OPS-03: readiness — kiem tra DB san sang (khong phai chi process con song).
+app.get('/ready', async (req, res) => {
+  const { get, DIALECT } = require('./src/db');
+  const checks = { db: false, dialect: DIALECT };
+  try {
+    await get('SELECT 1 AS ok');
+    checks.db = true;
+  } catch (e) {
+    checks.db = false;
+    checks.dbError = e.message;
+  }
+  const ready = checks.db;
+  return res.status(ready ? 200 : 503).json({
+    ok: ready,
+    status: ready ? 'ready' : 'not_ready',
+    service: 'agent_svc',
+    version: '8.0.0',
+    checks,
+    time: new Date().toISOString(),
+  });
+});
 app.use('/', chatRoutes);
 app.get('/brief', internalLimiter, async (req, res) => {
   try {

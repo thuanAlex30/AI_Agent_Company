@@ -18,7 +18,11 @@ function reqIntPos(body, field, opts = {}) {
     throw new AppError('VALIDATION', `Thieu truong ${field}`, 400, { fields: [field] });
   }
   const n = Number(v);
-  if (!Number.isInteger(n) || n <= 0) throw new AppError('VALIDATION', `Truong ${field} phai la so nguyen duong (dong)`, 400, { fields: [field] });
+  // allowZero: cho phep 0 (vi du chi phi tuyen dung = 0).
+  // So am van bi tu choi (chi phi/so luong khong the am).
+  if (!Number.isInteger(n) || n < 0 || (!opts.allowZero && n === 0)) {
+    throw new AppError('VALIDATION', `Truong ${field} phai la so nguyen duong (${opts.allowZero ? '>= 0' : '> 0'})`, 400, { fields: [field] });
+  }
   return n;
 }
 function reqCode(body, field = 'code') {

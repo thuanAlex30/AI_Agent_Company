@@ -1,0 +1,23 @@
+# Dockerfile.backup — image rieng cho backup (OPS-04).
+# node:20-alpine mac dinh KHONG co bash/sqlite3/postgresql-client.
+# Backup chay trong container backend se fail ngay (execFile 'bash' -> ENOENT).
+# Image nay co dung tool: bash + postgresql-client (pg_dump/pg_restore) + sqlite.
+FROM node:20-alpine
+WORKDIR /app
+
+RUN apk add --no-cache \
+      bash \
+      tzdata \
+      postgresql16-client \
+      sqlite \
+      coreutils
+
+COPY package*.json ./
+RUN npm install --omit=dev
+COPY . .
+
+# TZ Asia/Ho_Chi_Minh cho ten file backup theo gio Viet
+ENV TZ=Asia/Ho_Chi_Minh
+# Lenh mac dinh: vong lap sleep 1 ngay, chay backup.sh moi lan.
+# Script tu lo cron (xem scripts/backup-loop.sh).
+CMD ["bash", "/app/scripts/backup-loop.sh"]
