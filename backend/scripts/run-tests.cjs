@@ -62,6 +62,29 @@ if (!files.length) {
 console.log(`[run-tests] node ${process.version} — ${files.length} file test:`);
 for (const f of files) console.log(`  - ${path.relative(ROOT, f).replace(/\\/g, '/')}`);
 
+// PRE-BOOTSTRAP (RACE-FIX, CI run 42388510812: `MIGRATE FAIL: database is locked`):
+//   Moi file test chay trong process rieng va cung require tests/setup.js.
+//   Du co bootstrap-lock trong setup.js, van migrate/seed MOT LAN o day
+//   TRUOC khi spawn suite de cua so canh tranh gan nhu bang 0 va loi
+//   bootstrap hien ro ngay (fail-fast) thay vi lan vao hook tung file.
+//   - Dung chinh tests/setup.js (cung resolve DATABASE_PATH + guard DB dev),
+//     nen hanh vi giong het khi chay 1 file le (`node --test tests/x.test.js`).
+//   - Duong PG (PG_HOST) cung di qua day, khong doi sang SQLite.
+//   - KHONG nuot loi: pre-bootstrap fail => exit != 0, khong chay suite.
+console.log('[run-tests] pre-bootstrap DB test (migrate/seed 1 lan truoc suite)...');
+const pre = spawnSync(process.execPath,
+  ['-e', "require('./tests/setup.js').ensureDb().then(()=>process.exit(0)).catch((e)=>{console.error('[run-tests] pre-bootstrap FAIL:', (e && e.message) || e);process.exit(1)})"],
+  { stdio: 'inherit', cwd: ROOT, env: { ...process.env, NODE_ENV: 'test' } });
+if (pre.error) {
+  console.error(`[run-tests] khong chay duoc pre-bootstrap: ${pre.error.message}`);
+  process.exit(1);
+}
+if (pre.status !== 0) {
+  console.error('[run-tests] pre-bootstrap FAIL — dung suite, khong che exit code.');
+  process.exit(typeof pre.status === 'number' ? pre.status : 1);
+}
+console.log('[run-tests] pre-bootstrap OK');
+
 const args = ['--test', '--test-concurrency=1', ...files];
 const res = spawnSync(process.execPath, args, {
   stdio: 'inherit',

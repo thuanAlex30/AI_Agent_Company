@@ -466,6 +466,32 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
   ok(/migrate/.test(setupSrc), 'Phase 0.1: tests/setup.js tu chay migrate + seed');
 })();
 
+// 12.8 — TEST-BOOT-01 (CI run 42388510812: `MIGRATE FAIL: database is locked`):
+//   toan bo bootstrap SQLite (migrate + demo seed + storefront seed) phai chay
+//   trong bootstrap-lock cross-process; stale chi duoc don khi lock CU + PID
+//   chu DA CHET; khong tu y xoa lock cua process song; run-tests pre-bootstrap
+//   1 lan; loi that fail (khong nuot); PG khong dung file lock.
+(function testBootstrapRaceCheck() {
+  const lockSrc = read(path.join(ROOT, 'tests/bootstrap-lock.js'));
+  ok(/withBootstrapLock/.test(lockSrc), 'TEST-BOOT-01: co module tests/bootstrap-lock.js (withBootstrapLock)');
+  ok(/flag:\s*['"]wx['"]/.test(lockSrc), 'TEST-BOOT-01: acquire bang create-exclusive (wx) — chi 1 owner');
+  ok(/isAlive/.test(lockSrc) && /ESRCH/.test(lockSrc), 'TEST-BOOT-01: stale chi duoc don khi PID chu da chet (kill ESRCH)');
+  ok(/STALE_MS/.test(lockSrc), 'TEST-BOOT-01: stale yeu cau lock QUA CU (khong xoa lock moi cua process song)');
+  ok(/nonce/.test(lockSrc), 'TEST-BOOT-01: release chi xoa khi nonce khop (dung owner moi duoc xoa)');
+  ok(!/\|\|\s*true/.test(lockSrc), 'TEST-BOOT-01: bootstrap-lock khong che exit code');
+  const setupSrc = read(path.join(ROOT, 'tests/setup.js'));
+  ok(/withBootstrapLock/.test(setupSrc), 'TEST-BOOT-01: setup.js chay TOAN BO bootstrap trong lock (khong bo lot migrate/seed)');
+  ok(!/\.bizops-test-seed\.lock/.test(setupSrc), 'TEST-BOOT-01: setup.js khong con lock cu rieng cho seed (bo lot migrate)');
+  ok(/seed-storefront FAIL/.test(setupSrc), 'TEST-BOOT-01: loi seed that phai THROW (khong console.error roi di tiep)');
+  ok(/PG_HOST/.test(setupSrc), 'TEST-BOOT-01: duong PG khong dung file lock SQLite');
+  const runnerSrc = read(path.join(ROOT, 'scripts/run-tests.cjs'));
+  ok(/pre-bootstrap/.test(runnerSrc), 'TEST-BOOT-01: run-tests.cjs pre-bootstrap 1 lan truoc suite');
+  const runnerCode = runnerSrc.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  ok(!/\|\|\s*true/.test(runnerCode), 'TEST-BOOT-01: run-tests khong che exit code');
+  ok(fs.existsSync(path.join(ROOT, 'tests', 'test-bootstrap.test.js')),
+    'TEST-BOOT-01: ton tai tests/test-bootstrap.test.js (regression bootstrap race)');
+})();
+
 // ===========================================================================
 // 13. PHASE 3 — SCOPE V2 (P0-3/4/5 + P2-19)
 //     Scope phai enforce SERVER-SIDE, theo phong ban, FAIL-CLOSED, dong nhat

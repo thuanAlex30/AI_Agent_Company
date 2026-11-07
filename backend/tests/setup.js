@@ -44,29 +44,46 @@ process.env.DATABASE_PATH = dbPath;
 // --- Tu migrate + seed (idempotent) ---------------------------------------
 // Chi chay 1 lan cho ca process (moi file test require setup.js rieng,
 // nhung Node cache module -> chi chay 1 lan).
+//
+// RACE-FIX (CI run 42388510812: `MIGRATE FAIL: database is locked`):
+//   Node test runner chay MOI FILE TEST trong process rieng, tat ca cung
+//   tro vao MOT file SQLite (data/bizops-test.db). Lock cu chi bao quanh
+//   seed-storefront, BO LOT migrate() + demo seed, va stale-lock cu tu y
+//   xoa lock cua process khac => nhieu process cung migrate/seed.
+//   => TOAN BO bootstrap (migrate + demo seed + storefront seed) chay trong
+//      bootstrap-lock (tests/bootstrap-lock.js): acquire bang create-exclusive,
+//      chi xoa stale khi lock CU + PID chu DA CHET, het timeout ma lock van
+//      bi process SONG giu => THROW (fail that, khong nuot loi).
+//   Duong PG (PG_HOST) khong dung file lock — chay truc tiep nhu cu.
 let ready = null;
 function ensureDb() {
   if (!ready) {
     ready = (async () => {
-      const { migrate } = require('../src/db/migrate');
-      await migrate();
-      const { get } = require('../src/common/db');
-      // PHASE 0.1 (fix race): nhieu file test chay SONG SONG tren cung DB test.
-      // Neu chi kiem tra `users` co rong hay khong, 1 file test co the chen
-      // user truoc khi seed chay => seed bi skip => thieu user 'admin' =>
-      // test fail lung tung. => kiem tra DUNG user seed ('admin') moi seed.
-      const admin = await get("SELECT id FROM users WHERE username='admin'");
-      if (!admin) {
-        const { execSync } = require('child_process');
-        execSync(`node "${path.join(BACKEND_DIR, 'src', 'db', 'migrate.js')}" --seed`, {
-          cwd: BACKEND_DIR,
-          stdio: 'inherit',
-          env: { ...process.env, DATABASE_PATH: dbPath, ALLOW_AUTO_SEED: '1' },
-        });
-      }
-      // Seed storefront (COMBO-SANG, DV-*, banners, promotions) — idempotent.
-      await seedStorefront();
-      return true;
+      const boot = async () => {
+        const { migrate } = require('../src/db/migrate');
+        await migrate();
+        const { get } = require('../src/common/db');
+        // PHASE 0.1 (fix race): nhieu file test chay SONG SONG tren cung DB test.
+        // Neu chi kiem tra `users` co rong hay khong, 1 file test co the chen
+        // user truoc khi seed chay => seed bi skip => thieu user 'admin' =>
+        // test fail lung tung. => kiem tra DUNG user seed ('admin') moi seed.
+        const admin = await get("SELECT id FROM users WHERE username='admin'");
+        if (!admin) {
+          const { execSync } = require('child_process');
+          execSync(`node "${path.join(BACKEND_DIR, 'src', 'db', 'migrate.js')}" --seed`, {
+            cwd: BACKEND_DIR,
+            stdio: 'inherit',
+            env: { ...process.env, DATABASE_PATH: dbPath, ALLOW_AUTO_SEED: '1' },
+          });
+        }
+        // Seed storefront (COMBO-SANG, DV-*, banners, promotions) — idempotent.
+        // Loi seed that phai THROW (fail test) — khong console.error roi di tiep.
+        await seedStorefront();
+        return true;
+      };
+      if (process.env.PG_HOST) return boot();
+      const { withBootstrapLock } = require('./bootstrap-lock');
+      return withBootstrapLock(dbPath, boot);
     })();
   }
   return ready;
@@ -75,49 +92,22 @@ function ensureDb() {
 /**
  * Chay seed-storefront.cjs (dialect-agnostic) — idempotent.
  *
- * Node test runner chay TUNG FILE TEST trong MOT process rieng => nhieu
- * process goi setup.js song song => nhieu process cung chay migrate/seed
- * => "database is locked". => dung file lock de chi MOT process chay seed,
- * process con lai cho (poll) den khi lock duoc giai phong.
+ * Da chay trong bootstrap-lock cua ensureDb() nen khong can lock rieng.
+ * Loi seed that => reject (test fail that), khong nuot exception.
  */
-const LOCK_FILE = path.join(REPO_DATA_DIR, '.bizops-test-seed.lock');
-const LOCK_TIMEOUT_MS = 120000;
-
 async function seedStorefront() {
-  const fs2 = require('fs');
-  let acquired = false;
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  while (!acquired) {
-    try {
-      fs2.writeFileSync(LOCK_FILE, String(process.pid), { flag: 'wx' });
-      acquired = true;
-    } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-      // Lock da ton tai -> cho mot chút roi thu lai.
-      if (Date.now() > deadline) {
-        // Lock "ket" (process chet giua chung) => xoa va thu lai.
-        try { fs2.unlinkSync(LOCK_FILE); } catch {}
-        continue;
+  const { execFile } = require('child_process');
+  await new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [path.join(BACKEND_DIR, 'seed-storefront.cjs')],
+      { cwd: BACKEND_DIR, env: { ...process.env, DATABASE_PATH: dbPath } },
+      (err) => {
+        if (err) return reject(new Error('[setup] seed-storefront FAIL: ' + err.message));
+        resolve();
       }
-      await new Promise((r) => setTimeout(r, 200));
-    }
-  }
-  try {
-    const { execFile } = require('child_process');
-    await new Promise((resolve) => {
-      execFile(
-        process.execPath,
-        [path.join(BACKEND_DIR, 'seed-storefront.cjs')],
-        { cwd: BACKEND_DIR, env: { ...process.env, DATABASE_PATH: dbPath } },
-        (err) => {
-          if (err) console.error('[setup] seed-storefront fail:', err.message);
-          resolve();
-        }
-      );
-    });
-  } finally {
-    try { fs2.unlinkSync(LOCK_FILE); } catch {}
-  }
+    );
+  });
 }
 
 // Node test runner: hook 'before' chay 1 lan truoc tat ca test trong file.

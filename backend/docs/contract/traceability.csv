@@ -87,3 +87,4 @@ QA-08,Agent rule-based chat + availability + public chat,agent,chat-rule.test.js
 SEC-11,Doi mat khau chinh user (old_password + policy chu+so>=8 + tang auth_version + revoke all sessions + audit cung tx),users+refresh_tokens+audit_log,auth.test.js|auth-password.test.js,tab-all
 SEC-12,Agent audit fail-closed + ID parity (insertedId + no ORDER BY id fallback + tx audit),tickets+ratings+audit_log,agent-audit-parity.test.js,tab-cskh
 PG-DB-REG,Dialect/data-integrity regression (PG-DB-01/04/06/07/08/09 + TYPE-01 + TEST-ISO-01),system,dialect-regression.test.js,tab-all
+TEST-BOOT-01,SQLite test bootstrap khong race (bootstrap-lock + pre-bootstrap 1 lan + guard DB dev),system,test-bootstrap.test.js,tab-all
