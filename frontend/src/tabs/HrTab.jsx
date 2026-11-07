@@ -1,33 +1,71 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api, fmtVND } from '../api.js';
+import { useQuery } from '../hooks/useApi.js';
+import { DataTable, ErrorState, FormField, LoadingState, PageHeader, SectionCard, StatusBadge, useMutation } from '../components/ui.jsx';
 
 export default function HrTab({ toast }) {
+  const { data: emps, loading, error, reload } = useQuery(async () => api('/api/employees'), []);
   const [code, setCode] = useState('');
-  const [emps, setEmps] = useState([]);
-  const [today, setToday] = useState([]);
+  const [today, setToday] = useState(null);
   const [month, setMonth] = useState('');
-  const [pay, setPay] = useState([]);
-  async function loadEmp() { try { setEmps(await api('/api/employees')); } catch (e) { toast(e.message); } }
-  useEffect(() => { loadEmp(); }, []);
+  const [pay, setPay] = useState(null);
+  const m = useMutation(async (kind, payload) => {
+    if (kind === 'checkin') {
+      const r = await api('/api/attendance/checkin', { method: 'POST', body: JSON.stringify({ employee_code: payload.trim() }) });
+      toast('Checkin OK: ' + r.status, 'ok');
+    } else if (kind === 'checkout') {
+      await api('/api/attendance/checkout', { method: 'POST', body: JSON.stringify({ employee_code: payload.trim() }) });
+      toast('Checkout OK', 'ok');
+    } else if (kind === 'today') {
+      setToday(await api('/api/hr/today'));
+    } else if (kind === 'payroll') {
+      setPay(await api('/api/hr/payroll-preview' + (payload.trim() ? '?month=' + encodeURIComponent(payload.trim()) : '')));
+    }
+  });
+
+  function attend(kind) {
+    if (!code.trim()) { toast('Nhập mã nhân viên', 'err'); return; }
+    m.run(kind, code).catch((e) => toast(e.message, 'err'));
+  }
+
+  if (loading) return (<><PageHeader title="Nhân sự" /><LoadingState /></>);
+  if (error) return (<><PageHeader title="Nhân sự" actions={<button className="btn small ghost" onClick={reload}>Thử lại</button>} /><ErrorState error={error} onRetry={reload} /></>);
+
   return (
     <>
-      <div className="card"><h3>Chấm công (mã NV, chống chấm hộ)</h3>
-        <div className="row"><input value={code} onChange={(e) => setCode(e.target.value)} placeholder="employee_code (vd NV101)" />
-        <button className="btn" onClick={async () => { try { const r = await api('/api/attendance/checkin', { method: 'POST', body: JSON.stringify({ employee_code: code.trim() }) }); toast('Checkin OK: ' + r.status); } catch (e) { toast(e.message); } }}>Checkin</button>
-        <button className="btn" onClick={async () => { try { await api('/api/attendance/checkout', { method: 'POST', body: JSON.stringify({ employee_code: code.trim() }) }); toast('Checkout OK'); } catch (e) { toast(e.message); } }}>Checkout</button>
-        <button className="btn ghost" onClick={async () => { try { setToday(await api('/api/hr/today')); } catch (e) { toast(e.message); } }}>Hôm nay</button></div>
-        {!!today.length && <table><tbody><tr><th>Mã</th><th>Tên</th><th>Status</th></tr>{today.slice(0, 30).map((r, i) => <tr key={i}><td>{r.employee_code}</td><td>{r.name}</td><td>{r.status}</td></tr>)}</tbody></table>}
-      </div>
-      <div className="card"><h3>Nhân sự (lương đã lọc backend — sales không thấy)</h3>
-        <table><tbody><tr><th>Mã</th><th>Tên</th><th>Phòng</th><th>Lương</th></tr>
-        {emps.slice(0, 30).map((e) => <tr key={e.code}><td>{e.code}</td><td>{e.name}</td><td>{e.dept_code}</td><td>{e.salary_base != null ? fmtVND(e.salary_base) : '(ẩn)'}</td></tr>)}
-        </tbody></table>
-      </div>
-      <div className="card"><h3>Payroll preview (salary/26 x ngày present)</h3>
-        <div className="row"><input value={month} onChange={(e) => setMonth(e.target.value)} placeholder="YYYY-MM" />
-        <button className="btn" onClick={async () => { try { setPay(await api('/api/hr/payroll-preview' + (month.trim() ? '?month=' + encodeURIComponent(month.trim()) : ''))); } catch (e) { toast(e.message); } }}>Xem</button></div>
-        {!!pay.length && <table><tbody><tr><th>Mã</th><th>Ngày công</th><th>Lương</th></tr>{pay.slice(0, 30).map((p, i) => <tr key={i}><td>{p.employee_code || p.code}</td><td>{p.present_days ?? p.days ?? ''}</td><td>{fmtVND(p.pay ?? p.amount)}</td></tr>)}</tbody></table>}
-      </div>
+      <PageHeader title="Nhân sự" desc="Chấm công, danh sách nhân sự, payroll preview. Lương do backend lọc theo quyền — UI không suy đoán."
+        actions={<button className="btn small ghost" onClick={reload}>Tải lại</button>} />
+      <SectionCard title="Chấm công" desc="POST /api/attendance/checkin|checkout. Mã NV phải khớp user đăng nhập (trừ hr/manager+ chấm hộ).">
+        <div className="row">
+          <FormField label="Mã nhân viên"><input className="input" value={code} onChange={(e) => setCode(e.target.value)} placeholder="employee_code (vd NV101)" autoComplete="off" /></FormField>
+          <span className="btn-row">
+            <button className="btn" disabled={m.busy} onClick={() => attend('checkin')}>Checkin</button>
+            <button className="btn ghost" disabled={m.busy} onClick={() => attend('checkout')}>Checkout</button>
+            <button className="btn ghost" disabled={m.busy} onClick={() => m.run('today').catch((e) => toast(e.message, 'err'))}>Hôm nay</button>
+          </span>
+        </div>
+        {today && <DataTable columns={[{ key: 'employee_code', head: 'Mã' }, { key: 'name', head: 'Tên' }, { key: 'status', head: 'Status', render: (r) => <StatusBadge value={r.status} /> }]} rows={today.slice(0, 30)} keyOf={(r, i) => (r.employee_code || '') + i} empty={{ title: 'Hôm nay chưa có chấm công' }} />}
+      </SectionCard>
+
+      <SectionCard title="Nhân sự" desc="GET /api/employees — lương đã lọc backend (sales không thấy).">
+        <DataTable
+          columns={[
+            { key: 'code', head: 'Mã' },
+            { key: 'name', head: 'Tên' },
+            { key: 'dept_code', head: 'Phòng' },
+            { key: 'salary', head: 'Lương', render: (e) => e.salary_base != null ? fmtVND(e.salary_base) : '(ẩn theo quyền)' },
+          ]}
+          rows={(emps || []).slice(0, 30)} keyOf={(e) => e.code}
+          empty={{ title: 'Chưa có nhân sự' }} />
+      </SectionCard>
+
+      <SectionCard title="Payroll preview" desc="GET /api/hr/payroll-preview — salary/26 × ngày present. Chỉ là preview, không phải bảng lương chính thức.">
+        <form className="row" onSubmit={(e) => { e.preventDefault(); m.run('payroll', month).catch((e2) => toast(e2.message, 'err')); }}>
+          <FormField label="Tháng" hint="Định dạng YYYY-MM, để trống = tháng hiện tại"><input className="input" value={month} onChange={(e) => setMonth(e.target.value)} placeholder="YYYY-MM" /></FormField>
+          <button className="btn" type="submit" disabled={m.busy}>Xem</button>
+        </form>
+        {pay && <DataTable columns={[{ key: 'code', head: 'Mã', render: (p) => p.employee_code || p.code }, { key: 'days', head: 'Ngày công', render: (p) => p.present_days ?? p.days ?? '' }, { key: 'pay', head: 'Lương', render: (p) => fmtVND(p.pay ?? p.amount) }]} rows={pay.slice(0, 30)} keyOf={(p, i) => (p.employee_code || p.code || '') + i} empty={{ title: 'Không có dữ liệu payroll tháng này' }} />}
+      </SectionCard>
     </>
   );
 }

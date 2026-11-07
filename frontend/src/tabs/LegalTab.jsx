@@ -1,39 +1,71 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api.js';
+import { useQuery } from '../hooks/useApi.js';
+import { DataTable, ErrorState, FormField, LoadingState, PageHeader, SectionCard, StatusBadge, useMutation } from '../components/ui.jsx';
+
+async function loadLegal() {
+  const [appr, risks, audit] = await Promise.all([api('/api/approvals'), api('/api/risks'), api('/api/audit')]);
+  return { appr: appr || [], risks: risks || [], audit: audit || [] };
+}
 
 export default function LegalTab({ toast }) {
-  const [appr, setAppr] = useState([]);
-  const [risks, setRisks] = useState([]);
-  const [audit, setAudit] = useState([]);
+  const { data, loading, error, reload } = useQuery(loadLegal, []);
   const [rkTitle, setRkTitle] = useState('');
   const [rkLevel, setRkLevel] = useState('medium');
-  async function loadAppr() { try { setAppr(await api('/api/approvals')); } catch (e) { toast(e.message + (e.status === 403 ? ' (403 đúng quyền)' : '')); } }
-  async function loadRisks() { try { setRisks(await api('/api/risks')); } catch (e) { toast(e.message); } }
-  async function loadAudit() { try { setAudit(await api('/api/audit')); } catch (e) { toast(e.message + (e.status === 403 ? ' (403 đúng — chỉ cfo/ceo/legal/owner)' : '')); } }
-  useEffect(() => { loadAppr(); loadRisks(); loadAudit(); }, []);
+  const m = useMutation(async (kind, payload) => {
+    if (kind === 'decide') {
+      await api('/api/approvals/' + payload.id + '/decide', { method: 'POST', body: JSON.stringify({ decision: payload.decision }) });
+      toast(payload.decision === 'approved' ? 'Đã duyệt #' + payload.id : 'Đã từ chối #' + payload.id, 'ok'); reload();
+    } else {
+      await api('/api/risks', { method: 'POST', body: JSON.stringify({ title: payload.title, level: payload.level }) });
+      toast('Đã tạo risk', 'ok'); setRkTitle(''); reload();
+    }
+  });
+
+  if (loading) return (<><PageHeader title="Pháp chế & Kiểm soát" /><LoadingState /></>);
+  if (error) {
+    const forbidden = error.status === 403;
+    return (<><PageHeader title="Pháp chế & Kiểm soát" actions={<button className="btn small ghost" onClick={reload}>Thử lại</button>} />
+      <ErrorState error={error} onRetry={reload} />
+      {forbidden && <p style={{ color: 'var(--ink-400)', fontSize: '.9rem' }}>Audit log chỉ dành cho cfo/ceo/legal/owner — 403 là đúng quyền, không phải lỗi hệ thống.</p>}</>);
+  }
+  const { appr, risks, audit } = data;
+  const pending = appr.filter((x) => x.status === 'pending');
+
   return (
     <>
-      <div className="card"><h3>Phê duyệt (requester không tự duyệt)</h3>
-        <table><tbody><tr><th>ID</th><th>Loại</th><th>Ref</th><th>Level</th><th>Status</th><th></th></tr>
-        {appr.filter((x) => x.status === 'pending').slice(0, 20).map((a) => <tr key={a.id}><td>{a.id}</td><td>{a.ref_type}</td><td>{a.ref_id}</td><td>{a.level}</td><td>{a.status}</td><td>
-          <button className="btn small" onClick={async () => { try { await api('/api/approvals/' + a.id + '/decide', { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }); toast('Đã duyệt ' + a.id); loadAppr(); } catch (e) { toast(e.message); } }}>Duyệt</button>
-          <button className="btn small" onClick={async () => { try { await api('/api/approvals/' + a.id + '/decide', { method: 'POST', body: JSON.stringify({ decision: 'rejected' }) }); toast('Đã từ chối'); loadAppr(); } catch (e) { toast(e.message); } }}>Từ chối</button>
-        </td></tr>)}
-        </tbody></table>
-      </div>
-      <div className="card"><h3>Rủi ro</h3>
-        <div className="row"><input value={rkTitle} onChange={(e) => setRkTitle(e.target.value)} placeholder="tiêu đề rủi ro" style={{ minWidth: 220 }} />
-        <select value={rkLevel} onChange={(e) => setRkLevel(e.target.value)}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="critical">critical</option></select>
-        <button className="btn" onClick={async () => { try { await api('/api/risks', { method: 'POST', body: JSON.stringify({ title: rkTitle, level: rkLevel }) }); toast('Đã tạo risk'); loadRisks(); } catch (e) { toast(e.message); } }}>Tạo</button></div>
-        <table><tbody><tr><th>Title</th><th>Level</th><th>Status</th></tr>
-        {risks.slice(0, 20).map((r, i) => <tr key={i}><td>{r.title}</td><td>{r.level}</td><td>{r.status}</td></tr>)}
-        </tbody></table>
-      </div>
-      <div className="card"><h3>Audit log</h3>
-        <table><tbody><tr><th>Actor</th><th>Action</th><th>Table</th><th>Record</th></tr>
-        {audit.slice(0, 20).map((r, i) => <tr key={i}><td>{r.actor}</td><td>{r.action}</td><td>{r.table_name}</td><td>{r.record_id}</td></tr>)}
-        </tbody></table>
-      </div>
+      <PageHeader title="Pháp chế & Kiểm soát" desc="Phê duyệt, rủi ro, audit log. Requester không tự duyệt — backend enforce." actions={<button className="btn small ghost" onClick={reload}>Tải lại</button>} />
+      <SectionCard title="Phê duyệt đang chờ" desc="POST /api/approvals/:id/decide — approved|rejected.">
+        <DataTable
+          columns={[
+            { key: 'id', head: 'ID' },
+            { key: 'ref_type', head: 'Loại' },
+            { key: 'ref_id', head: 'Ref' },
+            { key: 'level', head: 'Level' },
+            { key: 'status', head: 'Status', render: (a) => <StatusBadge value={a.status} /> },
+            { key: 'act', head: '', render: (a) => (<span className="btn-row">
+              <button className="btn small" disabled={m.busy} onClick={() => m.run('decide', { id: a.id, decision: 'approved' }).catch((e) => toast(e.message, 'err'))}>Duyệt</button>
+              <button className="btn small ghost" disabled={m.busy} onClick={() => m.run('decide', { id: a.id, decision: 'rejected' }).catch((e) => toast(e.message, 'err'))}>Từ chối</button>
+            </span>) },
+          ]}
+          rows={pending.slice(0, 20)} keyOf={(a) => a.id}
+          empty={{ title: 'Không có phê duyệt tồn' }} />
+      </SectionCard>
+
+      <SectionCard title="Rủi ro" desc="POST /api/risks.">
+        <form className="row" onSubmit={(e) => { e.preventDefault(); if (!rkTitle.trim()) { toast('Nhập tiêu đề rủi ro', 'err'); return; } m.run('risk', { title: rkTitle.trim(), level: rkLevel }).catch((e2) => toast(e2.message, 'err')); }}>
+          <FormField label="Tiêu đề rủi ro"><input className="input" style={{ minWidth: 220 }} value={rkTitle} onChange={(e) => setRkTitle(e.target.value)} placeholder="tiêu đề rủi ro" /></FormField>
+          <FormField label="Mức độ"><select className="input" value={rkLevel} onChange={(e) => setRkLevel(e.target.value)}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="critical">critical</option></select></FormField>
+          <button className="btn" type="submit" disabled={m.busy}>Tạo</button>
+        </form>
+        <DataTable columns={[{ key: 'title', head: 'Title' }, { key: 'level', head: 'Level', render: (r) => <StatusBadge value={r.level} /> }, { key: 'status', head: 'Status', render: (r) => <StatusBadge value={r.status} /> }]}
+          rows={risks.slice(0, 20)} keyOf={(r, i) => (r.id ?? '') + i} empty={{ title: 'Chưa có rủi ro' }} />
+      </SectionCard>
+
+      <SectionCard title="Audit log" desc="GET /api/audit — read-only, chỉ role được phép.">
+        <DataTable columns={[{ key: 'actor', head: 'Actor' }, { key: 'action', head: 'Action' }, { key: 'table_name', head: 'Table' }, { key: 'record_id', head: 'Record' }]}
+          rows={audit.slice(0, 20)} keyOf={(r, i) => i} empty={{ title: 'Chưa có audit log' }} />
+      </SectionCard>
     </>
   );
 }

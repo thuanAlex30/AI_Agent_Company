@@ -4,26 +4,32 @@ import Button from '../components/ui/Button.jsx';
 import Icon from '../components/ui/Icon.jsx';
 import usePageMeta from '../hooks/usePageMeta.js';
 
+const CONTACT_EMAIL = import.meta.env.VITE_CONTACT_EMAIL || '';
+
+// FAQ trung thuc: chi neu nhung gi code/contract xac nhan, khong bia chinh sach.
 const FAQS = [
-  { q: 'Đặt món thế nào?', a: 'Thực đơn → Giỏ → Thanh toán (tên + SĐT + địa chỉ) → nhận mã DHW. Giá do server quyết định theo giờ/kênh, combo trừ kho theo thành phần.' },
-  { q: 'Tra cứu đơn ở đâu?', a: 'Mục Tra cứu: nhập mã DHW + SĐT/email đã đặt (2 yếu tố). Hoặc dùng link 30 ngày ở trang xác nhận — token tự tra cứu không cần SĐT.' },
-  { q: 'Thanh toán VietQR sao?', a: 'Sau khi đặt, quét VietQR với nội dung = mã đơn DHW. Webhook HMAC tự gạch nợ trong ~1 phút. Bấm “Kiểm tra đã gạch nợ chưa” ở trang xác nhận.' },
-  { q: 'Đổi trả thế nào?', a: 'Lỗi NSX đổi trong 7 ngày khi còn hóa đơn: gửi ảnh + mã đơn qua chat/CSKH, QA phản hồi 24h. Đơn COD chưa giao thì hủy qua CSKH.' },
-  { q: 'Giao hàng bao lâu?', a: 'Nội thành 1–2 ngày, liên tỉnh 2–4 ngày, phí theo vận đơn hiển thị lúc tra cứu. Teabreak setup tận nơi theo giờ đã đặt.' },
-  { q: 'Xuất hóa đơn VAT?', a: 'Nhập MST (10/13 số) lúc đặt teabreak/checkout. Kế toán xuất VAT trong 2 ngày làm việc, gửi qua email.' },
+  { q: 'BizOps AI gồm những gì?', a: 'ERP nhiều phòng ban (bán hàng, tài chính, mua/kho, nhân sự, CSKH, phê duyệt…) + AI Agent (rule engine + RAG top-3 kèm nguồn + 12 skill + brief sáng). Chi tiết module xem tại trang chủ mục Tính năng.' },
+  { q: 'Website này khác gì ứng dụng ERP nội bộ?', a: 'Đây là website giới thiệu sản phẩm (bản demo, không cần đăng nhập). Ứng dụng ERP nội bộ chạy riêng, có đăng nhập + phân quyền theo 12 phòng ban, mỗi vai chỉ thấy đúng phạm vi của mình.' },
+  { q: 'Khu Demo F&B là gì?', a: 'Là khu bán hàng mẫu giữ lại từ tên demo cũ (thực đơn, giỏ, thanh toán, tra cứu 2 yếu tố) để thử luồng đơn → kho → nợ → tiền. Dữ liệu minh họa, không phải cửa hàng thật. Mở tại /demo-fb.' },
+  { q: 'Tra cứu đơn demo ở đâu?', a: 'Trong khu demo F&B: nhập mã DHW + SĐT/email đã đặt (2 yếu tố), hoặc dùng link 30 ngày ở trang xác nhận. Kênh chat công khai không bao giờ trả số tiền công nợ.' },
+  { q: 'Đăng ký demo thế nào?', a: 'Website chưa có form nhận lead public nên không có nút gửi form giả. Gửi email kèm tên công ty, quy mô và module quan tâm — xem mục Liên hệ nhanh bên dưới.' },
+  { q: 'AI Agent có phải multi-agent tự hành?', a: 'Không. Agent hiện tại là trợ lý hỗ trợ: rule engine + RAG trích tài liệu kèm nguồn + skill theo dõi theo phòng ban. Số lạ ngoài ngữ cảnh bị che kèm cờ [CẦN-DUYỆT].' },
 ];
 
 export default function Support() {
   const [open, setOpen] = useState(0);
+  const mailto = CONTACT_EMAIL
+    ? `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Đăng ký demo BizOps AI')}`
+    : null;
 
-  usePageMeta('Hỗ trợ & FAQ', 'Câu hỏi thường gặp và kênh liên hệ BizOps Café.');
+  usePageMeta('Hỗ trợ & FAQ', 'Hỏi đáp về BizOps AI: sản phẩm, demo F&B, đăng ký demo, AI Agent.');
 
   return (
     <>
-      <p className="crumb"><Link to="/">Cửa hàng</Link> / Hỗ trợ</p>
+      <p className="crumb"><Link to="/">BizOps AI</Link> / Hỗ trợ</p>
       <div className="sechd">
         <h1 className="page-h1">Hỗ trợ &amp; FAQ</h1>
-        <span style={{ color: 'var(--ink-400)' }}>CSKH 8h–22h</span>
+        <span style={{ color: 'var(--ink-400)' }}>Website giới thiệu sản phẩm · bản demo</span>
       </div>
 
       <div className="faq-list">
@@ -31,7 +37,6 @@ export default function Support() {
           const expanded = open === i;
           return (
             <div className="faq-item" key={i}>
-              {/* heading-order (WCAG): trang co <h1> nen tieu de cau hoi phai la <h2> */}
               <h2 className="faq-h">
                 <button
                   type="button"
@@ -58,15 +63,17 @@ export default function Support() {
       <div className="card">
         <h2 className="ck-h">Liên hệ nhanh</h2>
         <div className="row">
-          <Link className="ui-btn btn-primary ui-btn-sm" to="/tra-cuu">Tra cứu đơn</Link>
-          <Link className="ui-btn btn-ghost ui-btn-sm" to="/dich-vu">Đặt teabreak</Link>
+          <Link className="ui-btn btn-primary ui-btn-sm" to="/demo-fb">Mở demo F&B</Link>
+          <a className="ui-btn btn-ghost ui-btn-sm" href="/#demo">Đăng ký demo</a>
           <span style={{ color: 'var(--ink-400)' }}>
-            <Icon name="phone" size={16} /> Hotline 1900-xxxx (8h–22h) · fanpage · Zalo OA · nút chat góc phải
+            <Icon name="mail" size={16} />{' '}
+            {mailto ? <a href={mailto} style={{ fontWeight: 700 }}>{CONTACT_EMAIL}</a> : 'Chưa cấu hình email liên hệ (VITE_CONTACT_EMAIL)'}
+            {' '}· nút chat góc phải (trợ lý demo)
           </span>
         </div>
         <div className="row" style={{ marginTop: 'var(--s-3)' }}>
           <Button variant="ghost" icon="chat" onClick={() => window.dispatchEvent(new Event('bizops-open-chat'))}>
-            Mở chat CSKH
+            Mở chat trợ lý
           </Button>
         </div>
       </div>

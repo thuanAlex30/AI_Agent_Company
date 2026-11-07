@@ -7,7 +7,9 @@ import Layout from './components/Layout.jsx';
 import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import { ToastProvider, useToast } from './components/ui/Toast.jsx';
 import { SkeletonCard } from './components/ui/Skeleton.jsx';
-import Home from './pages/Home.jsx';
+import Landing from './pages/Landing.jsx';
+
+const DemoFb = lazy(() => import('./pages/DemoFb.jsx'));
 
 const Catalog = lazy(() => import('./pages/Catalog.jsx'));
 const Detail = lazy(() => import('./pages/Detail.jsx'));
@@ -48,7 +50,8 @@ function Shell() {
         <ErrorBoundary name="page">
           <Suspense fallback={<RouteFallback />}>
             <Routes>
-              <Route path="/" element={<Home toast={toast} />} />
+              <Route path="/" element={<Landing toast={toast} />} />
+              <Route path="/demo-fb" element={<DemoFb toast={toast} />} />
               <Route path="/san-pham" element={<Catalog toast={toast} />} />
               <Route path="/san-pham/:slug" element={<Detail toast={toast} />} />
               <Route path="/dich-vu" element={<Services toast={toast} />} />

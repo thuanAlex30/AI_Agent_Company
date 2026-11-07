@@ -1,22 +1,43 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api.js';
+import { useQuery } from '../hooks/useApi.js';
+import { EmptyState, ErrorState, FormField, LoadingState, PageHeader, SectionCard, useMutation } from '../components/ui.jsx';
 
 const STAGES = ['idea', 'spec', 'building', 'testing', 'released'];
 
 export default function ProductTab({ toast }) {
-  const [rows, setRows] = useState([]);
+  const { data, loading, error, reload } = useQuery(async () => api('/api/product-features'), []);
   const [title, setTitle] = useState('');
-  async function load() { try { setRows(await api('/api/product-features')); } catch (e) { toast(e.message); } }
-  useEffect(() => { load(); }, []);
+  const m = useMutation(async () => {
+    await api('/api/product-features', { method: 'POST', body: JSON.stringify({ title: title.trim() }) });
+    toast('Đã tạo feature', 'ok'); setTitle(''); reload();
+  });
+
+  if (loading) return (<><PageHeader title="Sản phẩm" /><LoadingState /></>);
+  if (error) return (<><PageHeader title="Sản phẩm" actions={<button className="btn small ghost" onClick={reload}>Thử lại</button>} /><ErrorState error={error} onRetry={reload} /></>);
+  const rows = data || [];
+
   return (
-    <div className="card"><h3>Tính năng sản phẩm (kanban)</h3>
-      <div className="row"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="tên tính năng" style={{ minWidth: 220 }} />
-      <button className="btn" onClick={async () => { try { await api('/api/product-features', { method: 'POST', body: JSON.stringify({ title }) }); toast('Đã tạo feature'); load(); } catch (e) { toast(e.message); } }}>Tạo</button></div>
-      <div className="row">{STAGES.map((s) => (
-        <div className="card" key={s} style={{ minWidth: 180 }}><h4>{s}</h4>
-        {rows.filter((x) => x.stage === s).map((r, i) => <p key={i}>{r.title}</p>)}
-        </div>))}
-      </div>
-    </div>
+    <>
+      <PageHeader title="Sản phẩm" desc="Kanban tính năng theo stage backend trả về (idea→released). UI không tự chuyển stage vì API hiện chỉ hỗ trợ tạo." actions={<button className="btn small ghost" onClick={reload}>Tải lại</button>} />
+      <SectionCard title="Tạo tính năng" desc="POST /api/product-features.">
+        <form className="row" onSubmit={(e) => { e.preventDefault(); if (!title.trim()) { toast('Nhập tên tính năng', 'err'); return; } m.run().catch((e2) => toast(e2.message, 'err')); }}>
+          <FormField label="Tên tính năng"><input className="input" style={{ minWidth: 220 }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="tên tính năng" /></FormField>
+          <button className="btn" type="submit" disabled={m.busy}>{m.busy ? 'Đang gửi…' : 'Tạo'}</button>
+        </form>
+      </SectionCard>
+      {!rows.length
+        ? <EmptyState title="Chưa có tính năng" hint="Tạo feature đầu tiên bằng form phía trên." />
+        : (<div className="kpis" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+          {STAGES.map((s) => (
+            <div className="kpi" key={s} aria-label={'Cột ' + s}>
+              <small>{s} ({rows.filter((x) => x.stage === s).length})</small>
+              {rows.filter((x) => x.stage === s).slice(0, 10).map((r, i) => <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--line)', fontSize: '.9rem' }}>{r.title}</div>)}
+              {!rows.some((x) => x.stage === s) && <div style={{ color: 'var(--ink-400)', fontSize: '.85rem' }}>—</div>}
+            </div>
+          ))}
+        </div>)}
+      <p style={{ color: 'var(--ink-400)', fontSize: '.85rem' }}>Giới hạn backend: API hiện chỉ hỗ trợ tạo và liệt kê feature; chuyển stage chưa có endpoint nên UI không dựng nút chuyển state giả.</p>
+    </>
   );
 }

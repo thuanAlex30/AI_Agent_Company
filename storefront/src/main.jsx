@@ -25,6 +25,7 @@ import './styles/fonts.css';
 import './styles/art.css';
 import './styles/ui.css';
 import './styles.css';
+import './styles/landing.css';
 import App from './App.jsx';
 
 const container = document.getElementById('root');
@@ -48,7 +49,8 @@ const container = document.getElementById('root');
 function preloadRouteChunk() {
   const path = window.location.pathname;
   const MAP = {
-    '/': null, // Home da la import tinh -> da nam trong bundle chinh
+    '/': null, // Landing da la import tinh -> da nam trong bundle chinh
+    '/demo-fb': () => import('./pages/DemoFb.jsx'),
     '/san-pham': () => import('./pages/Catalog.jsx'),
     '/dich-vu': () => import('./pages/Services.jsx'),
     '/gio': () => import('./pages/Cart.jsx'),

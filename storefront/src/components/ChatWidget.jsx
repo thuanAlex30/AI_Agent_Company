@@ -4,18 +4,19 @@ import { postChat } from '../services/api.js';
 import Icon from './ui/Icon.jsx';
 import Button from './ui/Button.jsx';
 
-// SEC-01: KHONG co o/quick-question nao hoi "cong no theo SDT".
-// Chi huong khach sang trang Tra cuu don (2 yeu to).
+// SEC-01: KHONG co quick-question nao hoi "cong no theo SDT".
+// Chi huong khach sang khu demo F&B hoac trang Tra cuu don (2 yeu to).
 const QUICK = [
-  { label: 'Xem menu', go: '/san-pham' },
-  { label: 'Đặt món thế nào?', go: null },
-  { label: 'Đơn của tôi đâu?', go: '/tra-cuu' },
-  { label: 'Khuyến mãi nào?', go: '/khuyen-mai' },
-  { label: 'Đặt teabreak', go: '/dich-vu' },
+  { label: 'BizOps AI có gì?', go: null },
+  { label: 'Xem demo F&B', go: '/demo-fb' },
+  { label: 'AI Agent làm gì?', go: '/#ai-agent' },
+  { label: 'Đăng ký demo', go: '/#demo' },
+  { label: 'Hỗ trợ', go: '/ho-tro' },
 ];
 
 const ANSWERS = {
-  'Đặt món thế nào?': 'Chọn món ở Thực đơn → Giỏ → Thanh toán (tên + SĐT + địa chỉ) → nhận mã DHW để tra cứu. Giá do server quyết định lúc checkout.',
+  'BizOps AI có gì?': 'BizOps AI là ERP + AI Agent cho doanh nghiệp vừa và nhỏ: bán hàng, tài chính, kho, nhân sự, CSKH và phê duyệt trên một nền tảng. Xem chi tiết ở trang chủ hoặc mở khu Demo F&B (/demo-fb) để thử luồng mẫu.',
+  'AI Agent làm gì?': 'Agent hiện tại là rule engine + RAG (trích tài liệu kèm nguồn) + 12 skill theo phòng ban + brief sáng. Em là bản demo hỗ trợ tra cứu, không phải hệ multi-agent tự hành.',
 };
 
 const LS_KEY = 'bizops-chat-v1';
@@ -32,7 +33,7 @@ export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState(() => {
     const h = loadHist();
-    return h.length ? h : [{ me: false, text: 'Em chào mình ạ! Em hỗ trợ đặt món, tra cứu đơn, teabreak. Mình hỏi em nhé.' }];
+    return h.length ? h : [{ me: false, text: 'Em chào anh/chị! Em là trợ lý demo của BizOps AI (ERP + AI Agent). Mình hỏi về tính năng, quy trình mẫu hoặc mở demo F&B nhé.' }];
   });
   const [inp, setInp] = useState('');
   const [busy, setBusy] = useState(false);
@@ -79,8 +80,8 @@ export default function ChatWidget() {
       const msg = ex && ex.code === 'RATE_LIMIT'
         ? 'Bạn hỏi hơi nhanh, em cần nghỉ chút. Thử lại sau ít phút nhé.'
         : (ex && ex.status >= 500)
-          ? 'Hệ thống đang bận, em chưa trả lời được. Bạn thử lại sau hoặc gọi hotline 1900-xxxx.'
-          : 'Mạng bận, mình thử lại hoặc gọi hotline 1900-xxxx nhé.';
+          ? 'Hệ thống đang bận, em chưa trả lời được. Bạn thử lại sau nhé.'
+          : 'Mạng bận, mình thử lại nhé.';
       setMsgs((m) => m.filter((x) => x.typing !== typingId).concat([{ me: false, text: msg }]));
     } finally {
       setBusy(false);
@@ -101,7 +102,7 @@ export default function ChatWidget() {
       {open ? (
         <div className="chatbox" role="dialog" aria-label="Chat hỗ trợ">
           <header>
-            <span>CSKH BizOps Café {busy ? '· đang trả lời…' : '· online'}</span>
+            <span>Trợ lý BizOps AI (demo) {busy ? '· đang trả lời…' : '· online'}</span>
             <button type="button" className="xbtn" aria-label="Đóng chat" onClick={() => setOpen(false)}>
               <Icon name="close" size={18} />
             </button>
@@ -133,7 +134,7 @@ export default function ChatWidget() {
               aria-label="Nhắn tin"
               value={inp}
               onChange={(e) => setInp(e.target.value)}
-              placeholder="Nhắn tin… (vd: combo sáng còn không?)"
+              placeholder="Nhắn tin… (vd: BizOps AI có module gì?)"
               maxLength={MAX_LEN}
             />
             <Button size="sm" type="submit" loading={busy} disabled={busy}>Gửi</Button>

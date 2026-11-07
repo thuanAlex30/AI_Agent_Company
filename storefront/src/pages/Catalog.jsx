@@ -40,7 +40,7 @@ export default function Catalog({ toast }) {
   const search = sp.get('search') || '';
   const page = Math.max(1, Number(sp.get('page') || 1));
 
-  usePageMeta('Thực đơn', 'Cà phê, trà, bánh và combo tại BizOps Café — giao nội thành 1–2 ngày.');
+  usePageMeta('Thực đơn (demo F&B)', 'Thực đơn mẫu trong khu demo F&B — dữ liệu minh họa.');
 
   function set(k, v) {
     const n = new URLSearchParams(sp);
@@ -79,7 +79,7 @@ export default function Catalog({ toast }) {
 
   return (
     <>
-      <p className="crumb"><a href="/">Cửa hàng</a> / Thực đơn</p>
+      <p className="crumb"><a href="/demo-fb">Demo F&B</a> / Thực đơn (minh họa)</p>
 
       <div className="sechd">
         <h1 className="page-h1">Thực đơn</h1>

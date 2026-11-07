@@ -8,10 +8,9 @@ const BASE = process.argv[2] || 'http://127.0.0.1:5174';
 const CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 
 const ROUTES = [
-  { path: '/', name: 'Home' },
-  { path: '/san-pham', name: 'Catalog' },
-  { path: '/san-pham/ca-phe-sua', name: 'Detail' },
-  { path: '/thanh-toan', name: 'Checkout' },
+  { path: '/', name: 'Landing' },
+  { path: '/demo-fb', name: 'DemoFb' },
+  { path: '/ho-tro', name: 'Support' },
 ];
 
 const CATEGORIES = ['performance', 'accessibility', 'best-practices', 'seo'];

@@ -118,7 +118,7 @@ export default function Confirm({ toast }) {
       </div>
 
       <p style={{ color: 'var(--ink-400)', fontSize: 'var(--fs-sm)' }}>
-        Hotline 1900-xxxx (8h–22h) · giữ mã DHW để tra cứu · hóa đơn VAT xuất trong 2 ngày.
+        Đơn demo — giữ mã DHW để tra cứu thử ở mục Demo F&B.
       </p>
     </div>
   );

@@ -10,14 +10,11 @@ const CHROME = process.env.CHROME_PATH
   || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 
 const ROUTES = [
-  { path: '/', name: 'Home' },
+  { path: '/', name: 'Landing' },
+  { path: '/demo-fb', name: 'DemoFb' },
   { path: '/san-pham', name: 'Catalog' },
-  { path: '/san-pham/ca-phe-sua', name: 'Detail' },
-  { path: '/thanh-toan', name: 'Checkout' },
-  { path: '/gio', name: 'Cart' },
   { path: '/tra-cuu', name: 'Lookup' },
-  { path: '/dich-vu', name: 'Services' },
-  { path: '/khuyen-mai', name: 'Promos' },
+  { path: '/gio', name: 'Cart' },
   { path: '/ho-tro', name: 'Support' },
   { path: '/khong-co-trang-abc', name: '404' },
 ];

@@ -17,7 +17,7 @@ function Reveal({ children, className = '' }) {
   return <div ref={ref} className={'reveal ' + className}>{children}</div>;
 }
 
-export default function Home({ toast }) {
+export default function Home({ toast, pageTitle, pageDesc }) {
   const [products, setProducts] = useState(null);
   const [banners, setBanners] = useState([]);
   const [promos, setPromos] = useState([]);
@@ -26,8 +26,8 @@ export default function Home({ toast }) {
   const [reloadKey, setReloadKey] = useState(0);
 
   usePageMeta(
-    'Đặt món & Teabreak văn phòng',
-    'BizOps Café — cà phê, trà, bánh & teabreak văn phòng. Giao nội thành 1–2 ngày, đổi trả 7 ngày, tra cứu đơn 2 yếu tố.'
+    pageTitle || 'Đặt món & Teabreak văn phòng',
+    pageDesc || 'BizOps Café — cà phê, trà, bánh & teabreak văn phòng. Giao nội thành 1–2 ngày, đổi trả 7 ngày, tra cứu đơn 2 yếu tố.'
   );
 
   useEffect(() => {

@@ -31,7 +31,7 @@ export default function Lookup({ toast }) {
   const [busy, setBusy] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
-  usePageMeta('Tra cứu đơn', 'Tra cứu đơn hàng bằng mã đơn và SĐT/email — bảo mật 2 yếu tố.');
+  usePageMeta('Tra cứu đơn (demo F&B)', 'Tra cứu đơn demo bằng mã đơn và SĐT/email — bảo mật 2 yếu tố.');
 
   // Token tra cuu chi doc tu sessionStorage (khong nam trong URL)
   useEffect(() => {

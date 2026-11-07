@@ -1,22 +1,45 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api, fmtVND } from '../api.js';
+import { useQuery } from '../hooks/useApi.js';
+import { DataTable, ErrorState, FormField, LoadingState, PageHeader, SectionCard, useMutation } from '../components/ui.jsx';
 
 export default function MarketingTab({ toast }) {
-  const [rows, setRows] = useState([]);
+  const { data, loading, error, reload } = useQuery(async () => api('/api/marketing/roi'), []);
   const [name, setName] = useState('');
   const [ch, setCh] = useState('facebook');
   const [cost, setCost] = useState('');
-  async function load() { try { setRows(await api('/api/marketing/roi')); } catch (e) { toast(e.message); } }
-  useEffect(() => { load(); }, []);
+  const m = useMutation(async () => {
+    await api('/api/campaigns', { method: 'POST', body: JSON.stringify({ name: name.trim(), channel: ch, cost: Number(cost) || 0 }) });
+    toast('Đã tạo chiến dịch', 'ok'); setName(''); setCost(''); reload();
+  });
+
+  if (loading) return (<><PageHeader title="Marketing" /><LoadingState /></>);
+  if (error) return (<><PageHeader title="Marketing" actions={<button className="btn small ghost" onClick={reload}>Thử lại</button>} /><ErrorState error={error} onRetry={reload} /></>);
+
   return (
-    <div className="card"><h3>Chiến dịch + ROI</h3>
-      <div className="row"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="tên chiến dịch" />
-      <select value={ch} onChange={(e) => setCh(e.target.value)}><option value="facebook">facebook</option><option value="tiktok">tiktok</option><option value="zalo">zalo</option><option value="shopee">shopee</option><option value="offline">offline</option><option value="seo">seo</option></select>
-      <input value={cost} onChange={(e) => setCost(e.target.value)} type="number" placeholder="cost" />
-      <button className="btn" onClick={async () => { try { await api('/api/campaigns', { method: 'POST', body: JSON.stringify({ name, channel: ch, cost: Number(cost) || 0 }) }); toast('Đã tạo chiến dịch'); load(); } catch (e) { toast(e.message); } }}>Tạo</button></div>
-      <table><tbody><tr><th>Campaign</th><th>Cost</th><th>Leads</th><th>Orders</th><th>CPO</th></tr>
-      {rows.map((r, i) => <tr key={i}><td>{r.name}</td><td>{fmtVND(r.cost)}</td><td>{r.leads}</td><td>{r.orders}</td><td className={r.cpo_alert ? 'stock-low' : ''}>{r.cpo != null ? fmtVND(r.cpo) + (r.cpo_alert ? ' (cao >200k!)' : '') : '-'}</td></tr>)}
-      </tbody></table>
-    </div>
+    <>
+      <PageHeader title="Marketing" desc="Chiến dịch + ROI từ /api/marketing/roi. CPO cảnh báo khi >200k — không vẽ biểu đồ vì API chưa cung cấp chuỗi thời gian."
+        actions={<button className="btn small ghost" onClick={reload}>Tải lại</button>} />
+      <SectionCard title="Tạo chiến dịch" desc="POST /api/campaigns.">
+        <form className="row" onSubmit={(e) => { e.preventDefault(); if (!name.trim()) { toast('Nhập tên chiến dịch', 'err'); return; } m.run().catch((e2) => toast(e2.message, 'err')); }}>
+          <FormField label="Tên chiến dịch"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="tên chiến dịch" /></FormField>
+          <FormField label="Kênh"><select className="input" value={ch} onChange={(e) => setCh(e.target.value)}><option value="facebook">facebook</option><option value="tiktok">tiktok</option><option value="zalo">zalo</option><option value="shopee">shopee</option><option value="offline">offline</option><option value="seo">seo</option></select></FormField>
+          <FormField label="Cost (VND)"><input className="input" value={cost} onChange={(e) => setCost(e.target.value)} type="number" min="0" placeholder="cost" /></FormField>
+          <button className="btn" type="submit" disabled={m.busy}>{m.busy ? 'Đang gửi…' : 'Tạo'}</button>
+        </form>
+      </SectionCard>
+      <SectionCard title="ROI theo chiến dịch">
+        <DataTable
+          columns={[
+            { key: 'name', head: 'Campaign' },
+            { key: 'cost', head: 'Cost', render: (r) => fmtVND(r.cost) },
+            { key: 'leads', head: 'Leads' },
+            { key: 'orders', head: 'Orders' },
+            { key: 'cpo', head: 'CPO', render: (r) => r.cpo != null ? fmtVND(r.cpo) + (r.cpo_alert ? ' (cao >200k!)' : '') : '—' },
+          ]}
+          rows={data || []} keyOf={(r, i) => (r.name || '') + i}
+          empty={{ title: 'Chưa có chiến dịch', hint: 'Tạo chiến dịch đầu tiên bằng form phía trên.' }} />
+      </SectionCard>
+    </>
   );
 }

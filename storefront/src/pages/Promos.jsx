@@ -50,7 +50,7 @@ export default function Promos() {
   const [items, setItems] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  usePageMeta('Khuyến mãi', 'Các chương trình khuyến mãi đang chạy tại BizOps Café.');
+  usePageMeta('Khuyến mãi (demo F&B)', 'Ưu đãi mẫu trong khu demo F&B — dữ liệu minh họa.');
 
   useEffect(() => {
     setItems(null);
@@ -62,7 +62,7 @@ export default function Promos() {
 
   return (
     <>
-      <p className="crumb"><Link to="/">Cửa hàng</Link> / Khuyến mãi</p>
+      <p className="crumb"><Link to="/">BizOps AI</Link> / <Link to="/demo-fb">Demo F&B</Link> / Khuyến mãi</p>
       <div className="sechd">
         <h1 className="page-h1">Khuyến mãi</h1>
         <span style={{ color: 'var(--ink-400)' }}>{act.length} đang chạy</span>

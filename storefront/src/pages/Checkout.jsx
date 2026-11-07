@@ -40,7 +40,7 @@ export default function Checkout({ toast }) {
   const idemKey = useRef(uuid());
   const submitLock = useRef(false);
 
-  usePageMeta('Thanh toán', 'Hoàn tất đặt món BizOps Café — VietQR, COD hoặc ví điện tử.');
+  usePageMeta('Thanh toán (demo F&B)', 'Luồng checkout mẫu trong khu demo F&B — dữ liệu minh họa.');
 
   useEffect(() => {
     let alive = true;
@@ -143,7 +143,7 @@ export default function Checkout({ toast }) {
 
   return (
     <>
-      <p className="crumb"><Link to="/">Cửa hàng</Link> / <Link to="/gio">Giỏ</Link> / Thanh toán</p>
+      <p className="crumb"><Link to="/">BizOps AI</Link> / <Link to="/demo-fb">Demo F&B</Link> / <Link to="/gio">Giỏ</Link> / Thanh toán</p>
       <h1 className="page-h1" style={{ marginBottom: 'var(--s-4)' }}>Thanh toán</h1>
 
       <Stepper steps={STEPS} current={step} />

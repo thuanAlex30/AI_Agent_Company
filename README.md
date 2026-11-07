@@ -34,7 +34,7 @@ Không phụ thuộc Zalo/FB, tự host bằng Docker Compose.
 |---|---|---|---|
 | Backend API | `backend/` | 3000 | Toàn bộ nghiệp vụ + auth + RBAC + scope phòng ban |
 | ERP Frontend | `frontend/` | 5173 | 11 tab theo quyền (CEO/Sales/Finance/Ops/CSKH/Marketing/HR/IT/Legal/QA/Product) |
-| Storefront | `storefront/` | 5174 | Website bán hàng công khai, checkout idempotent |
+| Storefront | `storefront/` | 5174 | Website giới thiệu BizOps AI + khu demo F&B (dữ liệu minh họa) |
 | Agent service | `agent_svc/` | 3100 | Chatbot CSKH, RAG, 12 skill, brief 8h05 |
 | Contract docs | `docs/contract/` | — | manifest, RBAC matrix, ownership, openapi, traceability, invariants |
 | ADR | `docs/adr/` | — | Quyết định thiết kế lớn (0012–0015) |

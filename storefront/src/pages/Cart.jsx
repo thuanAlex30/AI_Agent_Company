@@ -16,7 +16,7 @@ export default function Cart({ toast }) {
   const [rows, setRows] = useState(null);
   const [total, setTotal] = useState(0);
 
-  usePageMeta('Giỏ hàng', 'Giỏ hàng của bạn tại BizOps Café.');
+  usePageMeta('Giỏ hàng (demo F&B)', 'Giỏ hàng mẫu trong khu demo F&B — dữ liệu minh họa.');
 
   useEffect(() => {
     const fn = () => setTick((t) => t + 1);
@@ -91,7 +91,7 @@ export default function Cart({ toast }) {
 
   return (
     <>
-      <p className="crumb"><Link to="/">Cửa hàng</Link> / Giỏ hàng</p>
+      <p className="crumb"><Link to="/">BizOps AI</Link> / <Link to="/demo-fb">Demo F&B</Link> / Giỏ hàng</p>
       <div className="sechd">
         <h1 className="page-h1">Giỏ hàng</h1>
         <span style={{ color: 'var(--ink-400)' }}>{count} món</span>

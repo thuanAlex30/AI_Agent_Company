@@ -24,7 +24,7 @@ export default function SearchPage({ toast }) {
   const [reloadKey, setReloadKey] = useState(0);
   const abortRef = useRef(null);
 
-  usePageMeta(q ? `Tìm kiếm: ${q}` : 'Tìm kiếm', 'Tìm món tại BizOps Café — gõ không dấu vẫn ra kết quả.');
+  usePageMeta(q ? `Tìm kiếm: ${q}` : 'Tìm kiếm (demo F&B)', 'Tìm món mẫu trong khu demo F&B — dữ liệu minh họa.');
 
   useEffect(() => {
     setItems(null);
@@ -42,7 +42,7 @@ export default function SearchPage({ toast }) {
 
   return (
     <>
-      <p className="crumb"><Link to="/">Cửa hàng</Link> / Tìm kiếm</p>
+      <p className="crumb"><Link to="/">BizOps AI</Link> / <Link to="/demo-fb">Demo F&B</Link> / Tìm kiếm</p>
 
       <div className="sechd">
         <h1 className="page-h1">Kết quả “{q || '…'}”</h1>

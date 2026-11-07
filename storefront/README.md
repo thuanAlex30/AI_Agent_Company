@@ -1,7 +1,13 @@
-# BizOps Storefront
+# BizOps Storefront — Website giới thiệu BizOps AI
 
-Cửa hàng công khai của BizOps Café — React 18 + Vite 5 + react-router-dom 6.
-Khách hàng dùng **không cần đăng nhập**; nhân viên dùng hệ thống nội bộ ở `frontend/`.
+Website public giới thiệu sản phẩm **BizOps AI — ERP và AI Agent cho doanh nghiệp
+vừa và nhỏ** (React 18 + Vite 5 + react-router-dom 6). Trang chủ `/` là landing
+giới thiệu sản phẩm (bản demo, không cần đăng nhập); nhân viên dùng ERP nội bộ ở `frontend/`.
+
+- **Cổng dev:** `http://localhost:5174`
+- **API:** `http://localhost:3000/api/public/*` (proxy qua Vite dev server, chỉ khi khu demo cần gọi)
+- **Khu demo F&B:** `/demo-fb` + các route `/san-pham`, `/gio`, `/thanh-toan`, `/tra-cuu`… giữ lại làm demo ngành, gắn nhãn **“Dữ liệu minh họa — demo ERP cho mô hình F&B”**, không phải luồng chính.
+- **Liên hệ:** cấu hình `VITE_CONTACT_EMAIL` (xem `.env.example`). Chưa có endpoint public nhận lead/demo nên landing KHÔNG có form gửi giả — chỉ dùng `mailto:` hoặc hướng dẫn cấu hình.
 
 - **Cổng dev:** `http://localhost:5174`
 - **API:** `http://localhost:3000/api/public/*` (proxy qua Vite dev server)
@@ -69,7 +75,9 @@ src/
                       QuantityInput, PriceTag, Countdown, States, Icon (SVG inline)
     Layout.jsx        Header dính, nav dưới mobile, skip-link, footer
     ErrorBoundary.jsx Lỗi toàn cục + theo trang (không bao giờ màn hình trắng)
-  pages/              Home, Catalog, Detail, Cart, Checkout, Confirm, Lookup,
+  pages/              Landing (trang chủ BizOps AI), DemoFb (khu demo F&B),
+                      Home (nội dung shop cũ — chỉ render trong DemoFb),
+                      Catalog, Detail, Cart, Checkout, Confirm, Lookup,
                       Services, Promos, Support, SearchPage
   services/
     api.js            Gọi `/api/public/*`

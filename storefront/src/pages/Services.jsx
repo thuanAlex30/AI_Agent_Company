@@ -28,7 +28,7 @@ export default function Services({ toast }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
 
-  usePageMeta('Teabreak văn phòng', 'Đặt lịch teabreak cho văn phòng 30–1000 người — báo giá trong 24h, xuất VAT.');
+  usePageMeta('Dịch vụ (demo F&B)', 'Gói dịch vụ mẫu trong khu demo F&B — dữ liệu minh họa.');
 
   useEffect(() => {
     setItems(null); setErr('');
@@ -83,7 +83,7 @@ export default function Services({ toast }) {
 
   return (
     <>
-      <p className="crumb"><Link to="/">Cửa hàng</Link> / Dịch vụ teabreak</p>
+      <p className="crumb"><Link to="/">BizOps AI</Link> / <Link to="/demo-fb">Demo F&B</Link> / Dịch vụ (minh họa)</p>
 
       <div className="sechd">
         <h1 className="page-h1">Dịch vụ teabreak văn phòng</h1>

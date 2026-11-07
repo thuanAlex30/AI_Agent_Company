@@ -1,7 +1,7 @@
 // hooks/usePageMeta.js — B1/B4 SEO: <title> + meta description + OG theo tung route
 import { useEffect } from 'react';
 
-const SITE = 'BizOps Café';
+const SITE = 'BizOps AI';
 
 function setMeta(attr, key, content) {
   let el = document.head.querySelector(`meta[${attr}="${key}"]`);

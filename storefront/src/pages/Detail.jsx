@@ -62,7 +62,7 @@ export default function Detail({ toast }) {
 
   return (
     <>
-      <p className="crumb"><Link to="/">Cửa hàng</Link> / <Link to="/san-pham">Thực đơn</Link> / {p.name}</p>
+      <p className="crumb"><Link to="/">BizOps AI</Link> / <Link to="/demo-fb">Demo F&B</Link> / <Link to="/san-pham">Thực đơn</Link> / {p.name}</p>
 
       <div className="card detail">
         <div className={'dimg art-' + art} aria-hidden="true" />
