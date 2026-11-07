@@ -1,18 +1,25 @@
 const express = require('express');
-const { authenticate, requirePerm } = require('../common/auth');
+const { authenticate, requirePerm, actorId } = require('../common/auth');
 const { ok, fail, AppError } = require('../common/errors');
 const { get, all, run, tx, norm } = require('../common/db');
 const { reqStr, reqIntPos, reqCode } = require('../common/validate');
 const { uploadCsv } = require('../common/upload');
+const {
+  requireScoped, scopedList, assertBusinessScope, enforceDept,
+  setBusinessScope, resolveResourceDept, scopeFilter,
+} = require('../common/scope');
 const financeService = require('../modules/finance/service');
 
 const router = express.Router();
 router.use(authenticate);
 
 // transactions
-router.get('/transactions', requirePerm('finance.read'), async (req, res) => {
-  try { return ok(res, await all('SELECT * FROM transactions ORDER BY id DESC LIMIT 500')); }
-  catch (e) { return fail(res, e); }
+router.get('/transactions', requireScoped('finance.read'), async (req, res) => {
+  try {
+    const rows = await scopedList(null, req.user, 'transactions',
+      'SELECT t.* FROM transactions t ORDER BY t.id DESC LIMIT 500');
+    return ok(res, rows);
+  } catch (e) { return fail(res, e); }
 });
 router.post('/transactions', requirePerm('payments.write'), async (req, res) => {
   try {
@@ -54,25 +61,36 @@ router.post('/reconcile/run', requirePerm('payments.write'), async (req, res) =>
 });
 
 // debts
-router.get('/debts', requirePerm('finance.read'), async (req, res) => {
+router.get('/debts', requireScoped('finance.read'), async (req, res) => {
   try {
-    const rows = await all('SELECT * FROM debts ORDER BY id DESC LIMIT 500');
+    const rows = await scopedList(null, req.user, 'debts',
+      'SELECT d.* FROM debts d ORDER BY d.id DESC LIMIT 500');
     return ok(res, financeService.classifyDebts(rows));
   } catch (e) { return fail(res, e); }
 });
-router.post('/debts', requirePerm('debts.write'), async (req, res) => {
+router.post('/debts', requireScoped('debts.write'), async (req, res) => {
   try {
     const amount = reqIntPos(req.body, 'amount');
     const type = reqStr(req.body, 'type', { enum: ['receivable', 'payable'] });
+    // Phase 3 (P0-4): kiem tra scope cua KH/don truoc khi tao cong no
+    // (khong ghi cong no cho doi ngoai pham vi).
+    if (req.body.customer_id) {
+      await assertBusinessScope(null, req.user, 'customers', req.body.customer_id);
+    }
+    if (req.body.order_id) {
+      await assertBusinessScope(null, req.user, 'orders', req.body.order_id);
+    }
     if (type === 'receivable') {
       return ok(res, await financeService.createReceivable(null, {
         customer_id: reqIntPos(req.body, 'customer_id'), order_id: req.body.order_id || null,
-        amount, due_date: req.body.due_date || null, created_by: req.user.username, note: req.body.note || null,
+        amount, due_date: req.body.due_date || null,
+        created_by: actorId(req.user), actor: req.user.username, note: req.body.note || null,
       }));
     }
     return ok(res, await financeService.createPayable(null, {
       order_id: req.body.order_id || null, amount,
-      due_date: req.body.due_date || null, created_by: req.user.username, note: req.body.note || null,
+      due_date: req.body.due_date || null,
+      created_by: actorId(req.user), actor: req.user.username, note: req.body.note || null,
     }));
   } catch (e) { return fail(res, e); }
 });
@@ -86,8 +104,12 @@ router.post('/debts/:id/remind', requirePerm('debts.write'), async (req, res) =>
 });
 
 // payments (ghi that, co Idempotency-Key)
-router.post('/payments', requirePerm('payments.write'), async (req, res) => {
+router.post('/payments', requireScoped('payments.write'), async (req, res) => {
   try {
+    // Phase 3 (P0-4): kiem tra scope don truoc khi ghi payment.
+    if (req.body.order_id) {
+      await assertBusinessScope(null, req.user, 'orders', req.body.order_id);
+    }
     const out = await tx((conn) => financeService.recordPayment(conn, {
       debt_id: req.body.debt_id || null, expense_id: req.body.expense_id || null,
       order_id: req.body.order_id || null, amount: Number(req.body.amount),
@@ -100,22 +122,36 @@ router.post('/payments', requirePerm('payments.write'), async (req, res) => {
 });
 
 // expenses
-router.get('/expenses', requirePerm('finance.read'), async (req, res) => {
-  try { return ok(res, await all('SELECT * FROM expenses ORDER BY id DESC LIMIT 200')); }
-  catch (e) { return fail(res, e); }
+router.get('/expenses', requireScoped('finance.read'), async (req, res) => {
+  try {
+    const rows = await scopedList(null, req.user, 'expenses',
+      'SELECT e.* FROM expenses e ORDER BY e.id DESC LIMIT 200');
+    return ok(res, rows);
+  } catch (e) { return fail(res, e); }
 });
-router.post('/expenses', requirePerm('expenses.write'), async (req, res) => {
+router.post('/expenses', requireScoped('expenses.write'), async (req, res) => {
   try {
     const code = reqCode(req.body, 'code');
     const amount = reqIntPos(req.body, 'amount');
     const type = reqStr(req.body, 'type', { enum: ['payable', 'fee', 'salary', 'marketing', 'other'] });
-    const r = await run('INSERT INTO expenses(code,type,amount,paid,status,created_by,due_date,note) VALUES(?,?,?,?,?,?,?,?)',
-      [code, type, amount, 0, 'open', req.user.username, req.body.due_date || null, req.body.note || null]);
-    const id = r.lastInsertRowid || (await get('SELECT id FROM expenses WHERE code=?', [code]))?.id;
-    // tu dong tao approval theo nguong v6.1
-    const level = amount < 5000000 ? 'leader' : amount < 50000000 ? 'manager' : amount < 200000000 ? 'cfo' : 'ceo';
-    await run('INSERT INTO approvals(ref_type,ref_id,requester,level,status) VALUES(?,?,?,?,?)', ['expense', id, req.user.id, level, 'pending']);
-    return ok(res, { id, code, approval_level: level });
+    const { writeAudit } = require('../common/audit');
+    // Phase 4 (GOV-01): ghi du lieu + audit + approval trong CUNG transaction.
+    const out = await tx(async (c) => {
+      const r = await c.run('INSERT INTO expenses(code,type,amount,paid,status,created_by,due_date,note) VALUES(?,?,?,?,?,?,?,?)',
+        [code, type, amount, 0, 'open', actorId(req.user), req.body.due_date || null, req.body.note || null]);
+      const id = r.lastInsertRowid || (await c.get('SELECT id FROM expenses WHERE code=?', [code]))?.id;
+      // Phase 3: expenses thuoc phong ban finance.
+      await setBusinessScope(c, 'expenses', id, 'finance');
+      // INV-6: nguong duyet LAY TU approval-matrix.json (khong hardcode).
+      const gov = require('../modules/governance/approvals');
+      const level = gov.levelForAmount(amount);
+      await c.run('INSERT INTO approvals(ref_type,ref_id,requester,level,status) VALUES(?,?,?,?,?)',
+        ['expense', id, req.user.id, level, 'pending']);
+      await setBusinessScope(c, 'approvals', id, 'finance');
+      await writeAudit(c, req.user.username, 'create', 'expenses', id, null, { code, amount, level });
+      return { id, code, approval_level: level };
+    });
+    return ok(res, out);
   } catch (e) { return fail(res, e); }
 });
 
@@ -123,18 +159,29 @@ router.get('/finance/kpis', requirePerm('finance.read'), async (req, res) => {
   try { return ok(res, await financeService.financeKpis(null)); }
   catch (e) { return fail(res, e); }
 });
-router.get('/reminders', requirePerm('finance.read'), async (req, res) => {
-  try { return ok(res, await all('SELECT * FROM reminder_log ORDER BY id DESC LIMIT 200')); }
-  catch (e) { return fail(res, e); }
-});
-router.get('/budgets', requirePerm('finance.read'), async (req, res) => {
-  try { return ok(res, await all('SELECT * FROM budgets ORDER BY month DESC LIMIT 200')); }
-  catch (e) { return fail(res, e); }
-});
-router.post('/budgets', requirePerm('budgets.write'), async (req, res) => {
+router.get('/reminders', requireScoped('finance.read'), async (req, res) => {
   try {
+    // reminder_log khong co dept_code -> doc qua resource_dept? Log khong gan
+    // scope => chi role toan cuc thay duoc (fail-closed cho multi).
+    const rows = await scopedList(null, req.user, 'reminder_log',
+      'SELECT r.* FROM reminder_log r ORDER BY r.id DESC LIMIT 200');
+    return ok(res, rows);
+  } catch (e) { return fail(res, e); }
+});
+router.get('/budgets', requireScoped('finance.read'), async (req, res) => {
+  try {
+    // budgets co cot dept_code that -> loc theo scope (fail-closed).
+    const rows = scopeFilter(req.user, await all('SELECT * FROM budgets ORDER BY month DESC LIMIT 200'), 'dept_code');
+    return ok(res, rows);
+  } catch (e) { return fail(res, e); }
+});
+router.post('/budgets', requireScoped('budgets.write'), async (req, res) => {
+  try {
+    const dept = reqStr(req.body, 'dept_code');
+    // Phase 3: chi tao budget cho phong ban trong scope.
+    enforceDept(req.user, dept, 'budget');
     await run('INSERT INTO budgets(dept_code,month,planned,actual) VALUES(?,?,?,?) ON CONFLICT(dept_code,month) DO NOTHING',
-      [reqStr(req.body, 'dept_code'), reqStr(req.body, 'month', { max: 7 }), reqIntPos(req.body, 'planned'), 0]);
+      [dept, reqStr(req.body, 'month', { max: 7 }), reqIntPos(req.body, 'planned'), 0]);
     return ok(res, { done: true });
   } catch (e) { return fail(res, e); }
 });

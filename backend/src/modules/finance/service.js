@@ -1,9 +1,15 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
-const { norm, todayVN, sinceVN } = require('../../common/db');
+const { setBusinessScope, resolveResourceDept } = require('../../common/scope');
+const { norm, todayVN, sinceVN, businessDayVN } = require('../../common/db');
 
 // NOTE: module nay so huu debts/payments/expenses/transactions/reminder_log/budgets.
 // Cap nhat trang thai don goi qua salesService.setOrderPaid (khong UPDATE truc tiep bang cua sales).
+//
+// Phase 1 (P0-1): quy uoc moi cho signature:
+//   - `created_by` = ID NGUOI (SO) -> cot BIGINT (created_by)
+//   - `actor`      = USERNAME (TEXT) -> audit_log.actor
+//   Mac dinh created_by = null (nghiep vu tu dong: cron/webhook/storefront).
 
 function dbConn(conn, fallback) {
   // conn (trong tx) co {query,get,run,lock}; fallback la module db async
@@ -20,7 +26,7 @@ async function withTx(fn, conn) {
   return db.tx(fn);
 }
 
-async function createReceivable(conn, { customer_id, order_id = null, amount, due_date = null, created_by = null, note = null }) {
+async function createReceivable(conn, { customer_id, order_id = null, amount, due_date = null, created_by = null, actor = null, note = null }) {
   return withTx(async (c) => {
     if (!customer_id || !amount || amount <= 0) throw new AppError('VALIDATION', 'Receivable can customer_id + amount>0', 400);
     const r = await c.run(
@@ -28,12 +34,15 @@ async function createReceivable(conn, { customer_id, order_id = null, amount, du
       [customer_id, order_id, 'receivable', amount, 0, due_date || due7(), note, created_by]
     );
     const id = r.lastInsertRowid || (await c.get('SELECT id FROM debts WHERE customer_id=? AND order_id ' + (order_id ? '=?' : 'IS NULL') + ' ORDER BY id DESC LIMIT 1', order_id ? [customer_id, order_id] : [customer_id]))?.id;
-    await writeAudit(c, created_by || 'system', 'create', 'debts', id, null, { customer_id, order_id, amount });
+    // Phase 3: cong no thuoc phong ban cua don (fallback finance).
+    const debtDept = await resolveResourceDept(c, 'debts', { orderId: order_id });
+    await setBusinessScope(c, 'debts', id, debtDept);
+    await writeAudit(c, actor || 'system', 'create', 'debts', id, null, { customer_id, order_id, amount });
     return { id };
   }, conn);
 }
 
-async function createPayable(conn, { order_id = null, amount, due_date = null, created_by = null, note = null }) {
+async function createPayable(conn, { order_id = null, amount, due_date = null, created_by = null, actor = null, note = null }) {
   return withTx(async (c) => {
     if (!amount || amount <= 0) throw new AppError('VALIDATION', 'Payable can amount>0', 400);
     const r = await c.run(
@@ -41,7 +50,9 @@ async function createPayable(conn, { order_id = null, amount, due_date = null, c
       [order_id, amount, due_date || due7(), note, created_by]
     );
     const id = r.lastInsertRowid || (await c.get('SELECT id FROM debts WHERE type=\'payable\' ORDER BY id DESC LIMIT 1'))?.id;
-    await writeAudit(c, created_by || 'system', 'create', 'debts', id, null, { order_id, amount });
+    // Phase 3: payable thuoc phong ban finance.
+    await setBusinessScope(c, 'debts', id, 'finance');
+    await writeAudit(c, actor || 'system', 'create', 'debts', id, null, { order_id, amount });
     return { id };
   }, conn);
 }
@@ -57,9 +68,8 @@ async function markDebtCancelled(conn, orderId, actor) {
 }
 
 function due7() {
-  const d = new Date(todayVN());
-  d.setDate(d.getDate() + 7);
-  return d.toISOString().slice(0, 10);
+  // Phase 0.5: cong 7 ngay theo gio VN (khong qua Date/UTC de tranh lech ngay).
+  return businessDayVN(7);
 }
 
 async function recordPayment(conn, { debt_id = null, expense_id = null, order_id = null, amount, method, actor = null, note = null, idempotency_key = null }) {
@@ -93,6 +103,8 @@ async function recordPayment(conn, { debt_id = null, expense_id = null, order_id
         throw e;
       }
     const pid = r.lastInsertRowid || (await c.get('SELECT id FROM payments WHERE debt_id=? ORDER BY id DESC LIMIT 1', [debt_id]))?.id;
+    // Phase 3: payment thuoc phong ban finance.
+    await setBusinessScope(c, 'payments', pid, 'finance');
     const status = newPaid >= Number(d.amount) ? 'done' : d.status;
     // TX-03: UPDATE co dieu kien (WHERE paid=? cu) -> neu row dang bi doi
     // boi giao dich khac thi changes=0 va ta rollback thay vi ghi de.
@@ -131,6 +143,7 @@ async function recordPayment(conn, { debt_id = null, expense_id = null, order_id
     throw e;
   }
   const pid = r.lastInsertRowid || (await c.get('SELECT id FROM payments WHERE expense_id=? ORDER BY id DESC LIMIT 1', [expense_id]))?.id;
+  await setBusinessScope(c, 'payments', pid, 'finance');
   const up = await c.run("UPDATE expenses SET paid=?, status=? WHERE id=? AND paid=?", [newPaid, newPaid >= Number(e.amount) ? 'done' : 'open', expense_id, Number(e.paid)]);
   if (Number(up?.changes || 0) === 0) throw new AppError('CONFLICT', 'Chi phi vua bi cap nhat boi giao dich khac — thu lai', 409);
   await writeAudit(c, actor || 'system', 'create', 'payments', pid, null, { expense_id, amount, method });
@@ -264,7 +277,9 @@ async function financeKpis(conn) {
 async function cashflow(conn) {
   const db = require('../../common/db');
   const c = dbConn(conn, db);
-  const rows = await c.query("SELECT date(paid_at) d, SUM(CASE WHEN debt_id IS NOT NULL THEN amount ELSE 0 END) thu, SUM(CASE WHEN expense_id IS NOT NULL THEN amount ELSE 0 END) chi FROM payments GROUP BY date(paid_at) ORDER BY d DESC LIMIT 30");
+  // Phase 0.2: `date(paid_at)` la SQLite-only -> luon that bi PostgreSQL.
+  // Dung substr(CAST(x AS TEXT),1,10) — chay duoc tren ca 2 dialect.
+  const rows = await c.query("SELECT substr(CAST(paid_at AS TEXT),1,10) d, SUM(CASE WHEN debt_id IS NOT NULL THEN amount ELSE 0 END) thu, SUM(CASE WHEN expense_id IS NOT NULL THEN amount ELSE 0 END) chi FROM payments GROUP BY substr(CAST(paid_at AS TEXT),1,10) ORDER BY d DESC LIMIT 30");
   return rows;
 }
 

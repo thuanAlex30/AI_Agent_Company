@@ -100,9 +100,17 @@ test('sec02: refresh token da thu hoi khong dung lai duoc', async () => {
   const rotated = await refresh(out.refresh);
   // Token cu (da xoay vong) phai bi tu choi
   await assert.rejects(() => refresh(out.refresh), (e) => e.status === 401);
-  // Token moi van dung duoc
-  const again = await refresh(rotated.refresh);
-  assert.ok(again.token);
+  // Phase 2 (P0-2): reuse detection phai THU HOI THAT TOAN BO session
+  // (lenh revoke-all chay NGOAI transaction nen khong bi rollback).
+  const rows = await db.all(
+    'SELECT revoked FROM refresh_tokens WHERE user_id=?', [out.user.id]
+  );
+  assert.equal(
+    rows.filter((r) => !r.revoked).length, 0,
+    'MOI refresh token cua user phai bi thu hoi sau khi phat hien reuse'
+  );
+  // Token moi (vua xoay vong) cung bi thu hoi theo — dung chinh sach reuse.
+  await assert.rejects(() => refresh(rotated.refresh), (e) => e.status === 401);
 });
 
 // ---------------------------------------------------------------------------
@@ -156,9 +164,17 @@ test('sec04: cookie production co HttpOnly + Secure + SameSite phu hop', async (
   const cookies = r.headers['set-cookie'] || [];
   assert.ok(cookies.length >= 2, 'phai set access_token + refresh_token');
   for (const c of cookies) {
-    assert.match(c, /HttpOnly/i, 'cookie phai HttpOnly: ' + c);
+    // Phase 2 (P1-16): csrf_token phai KHONG httpOnly (FE doc de gui header
+    // X-CSRF-Token). Token session (access/refresh) van phai httpOnly.
+    if (/^\s*csrf_token=/.test(c)) {
+      assert.doesNotMatch(c, /HttpOnly/i, 'csrf_token KHONG duoc HttpOnly: ' + c);
+    } else {
+      assert.match(c, /HttpOnly/i, 'cookie phai HttpOnly: ' + c);
+    }
     assert.match(c, /Secure/i, 'cookie production phai Secure: ' + c);
     assert.match(c, /SameSite/i, 'cookie phai co SameSite: ' + c);
   }
+  // csrf_token phai duoc tra ve trong body de FE su dung.
+  assert.ok(r.body.data && r.body.data.csrf_token, 'login phai tra csrf_token trong body');
   process.env.NODE_ENV = prevEnv;
 });

@@ -2,7 +2,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
 require('./config'); // SEC-02 v7: fail-fast secrets ngay khi boot (prod thieu/yeu -> throw, khong khoi dong)
-const { applySecurity, apiLimiter } = require('./common/security');
+const { applySecurity, apiLimiter, csrfGuard } = require('./common/security');
 const { errorHandler, ok } = require('./common/errors');
 const authRoutes = require('./routes/auth');
 const salesRoutes = require('./routes/sales');
@@ -30,6 +30,10 @@ applySecurity(app);
 // Storefront public co limiter rieng trong `public/limiters.js` (bucket rieng,
 // khoa theo IP+signature) — khach dung chung wifi van khong bi 429.
 app.use('/api/', apiLimiter);
+// Phase 2 (P1-16): CSRF guard cho moi mutation (POST/PUT/PATCH/DELETE).
+// Mount SAU public routes? KHONG — csrfGuard tu loai trung /api/public/*,
+// /api/auth/login, /api/auth/refresh. Mount TRUOC cac router de bao ve toan bo.
+app.use('/api/', csrfGuard);
 
 // --- OPS-03: health endpoints ------------------------------------------------
 // Liveness (/api/health): process con song -> luon 200. dung cho container restart.

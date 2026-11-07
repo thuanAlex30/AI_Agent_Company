@@ -1,5 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+// Phase 0.5: ten file log theo ngay VN (khong lech 1 ngay 00:00-07:00).
+const { todayVN } = require('./db');
 
 const LOG_DIR = path.join(__dirname, '..', '..', 'logs');
 
@@ -12,7 +14,7 @@ function line(level, msg, meta) {
 }
 function append(lineStr) {
   ensureDir();
-  const f = path.join(LOG_DIR, `app-${new Date().toISOString().slice(0, 10)}.log`);
+  const f = path.join(LOG_DIR, `app-${todayVN()}.log`);
   try { fs.appendFileSync(f, lineStr + '\n'); } catch {}
 }
 function info(msg, meta) { const l = line('INFO', msg, meta); console.log(l); append(l); }

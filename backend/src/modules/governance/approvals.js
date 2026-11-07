@@ -21,6 +21,20 @@ function levelForAmount(amount) {
   return 'ceo';
 }
 
+/**
+ * INV-6: nguong duyet HOP DONG lay TU approval-matrix.json (khong hardcode).
+ * Doc `amount_routing.contract` neu co; fallback `expense_po` + nguong legal.
+ */
+function levelForContract(amount) {
+  const m = loadMatrix();
+  const routing = (m.amount_routing && m.amount_routing.contract) || m.amount_routing.expense_po;
+  for (const r of routing) {
+    if (r.lt != null && Number(amount) < r.lt) return r.level;
+    if (r.gte != null && Number(amount) >= r.gte) return r.level;
+  }
+  return 'ceo';
+}
+
 function needsLegal(refType, amount, note) {
   if (refType !== 'contract') return false;
   if (Number(amount) >= 50000000) return true;
@@ -144,4 +158,4 @@ async function propagateApproval(c, ap, decision, actor) {
   // expense: khong doi status (payments tu check approval)
 }
 
-module.exports = { requestApproval, decideApproval, levelForAmount, needsLegal, userLevel, canDecide };
+module.exports = { requestApproval, decideApproval, levelForAmount, levelForContract, needsLegal, userLevel, canDecide };

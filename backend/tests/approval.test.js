@@ -71,11 +71,11 @@ test('appr4: contract >=50tr can ca ceo + legal moi signed', async () => {
   assert.equal(fin.status, 'signed');
 });
 
-test('appr5: scheduler dung 4 cron VN + approval-matrix v6.1', async () => {
+test('appr5: scheduler dung 5 cron VN + approval-matrix v6.1', async () => {
   const src = fs.readFileSync('src/common/scheduler.js', 'utf8');
   const n = (src.match(/cron\.schedule/g) || []).length;
-  assert.equal(n, 4, 'phai co dung 4 cron, thay ' + n);
-  for (const c of ['0 8 * * *', '*/5 * * * *', '0 2 * * *', '5 8 * * *']) {
+  assert.equal(n, 5, 'phai co dung 5 cron, thay ' + n);
+  for (const c of ['0 8 * * *', '*/5 * * * *', '0 2 * * *', '5 8 * * *', '30 3 * * *']) {
     assert.ok(src.includes(c), 'thieu cron ' + c);
   }
   assert.ok(src.includes('Asia/Ho_Chi_Minh'));

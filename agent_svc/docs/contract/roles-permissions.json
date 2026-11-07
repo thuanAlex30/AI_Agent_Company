@@ -1,1 +1,462 @@
-{"field_filter":{"employees.salary_base":{"allow":["cfo","ceo","hr","owner"],"deny_message":"FORBIDDEN salary"},"users.password_hash":{"allow":["owner"],"deny_message":"FORBIDDEN"}},"matrix":{"approvals.decide":["leader","manager","director","cfo","ceo","owner","legal"],"approvals.read":["leader","manager","director","cfo","ceo","owner","legal","hr","accountant"],"approvals.request":["accountant","cskh","hr","leader","manager","director","sales","staff","warehouse","cfo","ceo","owner","legal"],"attendance.checkin":["*"],"audit.read":["cfo","ceo","legal","owner"],"budgets.write":["cfo","ceo","owner"],"campaigns.write":["ceo","director","manager","owner"],"chat.write":["cskh","sales","manager","director","ceo","owner"],"customers.write":["manager","sales","director","coo","ceo","owner"],"debts.write":["accountant","cfo","ceo","owner"],"employees.write":["hr","manager","director","ceo","owner"],"expenses.write":["accountant","cfo","ceo","owner"],"finance.read":["accountant","cfo","ceo","owner","coo","director"],"hr.read":["hr","manager","director","ceo","owner","cfo"],"it.write":["manager","staff","director","ceo","owner"],"leads.write":["manager","sales","director","ceo","owner"],"orders.read":["accountant","cskh","sales","warehouse","manager","director","coo","ceo","owner"],"orders.write":["sales","manager","director","coo","ceo","owner"],"payments.write":["accountant","cfo","ceo","owner"],"po.write":["manager","director","coo","cfo","ceo","owner"],"productfeat.write":["manager","director","ceo","owner"],"products.write":["warehouse","manager","director","coo","owner"],"qa.write":["manager","director","ceo","owner","cfo","coo","staff","warehouse"],"quotes.write":["manager","sales","director","ceo","owner"],"risks.write":["manager","director","ceo","owner"],"shipments.write":["warehouse","manager","director","coo","owner"],"sop.write":["manager","director","ceo","owner","coo"],"stock.write":["warehouse","manager","director","coo","owner"],"tickets.write":["cskh","manager","director","ceo","owner"],"users.unlock":["hr","ceo","owner"],"users.write":["ceo","owner"]},"notes":["x-user-code chi dev, prod fail-fast neu NODE_ENV=production ma dung","checkin gan JWT: employee_code phai bang user.employee_code tru hr/manager+","GET /api/employees loc salary_base: chi owner,ceo,hr,cfo thay","attendance.checkin '*' = moi role dang nhap"],"role_scopes":{"accountant":{"dept":"finance","label":"Nhan vien Ke toan","can":["Doc don (read)","Tao receivable/payable (debts.write)","Ghi payment (payments.write)","Import sao ke + doi soat (payments.write)","Tao chi phi (expenses.write) — tu sinh approval","Nhac no (debts.write)"],"cannot":["Sua don/kho/van don truc tiep","Duyet approval","Xem audit","Sua luong"]},"ceo":{"dept":"ceo","label":"Giam doc dieu hanh","can":["Doc toan bo","Duyet cap ceo (<200tr) + thay cap duoi","Viet users (users.write)","Xem audit + salary"],"cannot":["Tu duyet de xuat cua chinh minh"]},"cfo":{"dept":"finance","label":"Giam doc Tai chinh","can":["Duyet cap cfo (<200tr chi phi/PO)","Ghi payment, tao no/chi phi, budget","Xem audit + salary"],"cannot":["Sua don/kho truc tiep (qua sales.setOrderPaid)","Tu duyet"]},"coo":{"dept":"ceo","label":"Giam doc Van hanh","can":["Tao/sua don, KH, PO, nhap/xuat kho, van don","Doc finance (finance.read)"],"cannot":["Ghi payment/tao no (cua ke toan)","Duyet approval","Xem audit/salary"]},"cskh":{"dept":"cskh","label":"Nhan vien CSKH","can":["Doc don (orders.read)","Tao/sua ticket + rating (tickets.write)","Chat (chat.write)","De xuat approval (approvals.request)"],"cannot":["Tao don/thanh toan/kho","Duyet","Xem tai chinh/nhan su chi tiet"]},"director":{"dept":"multi","label":"Giam doc khoi (Truong khoi)","can":["Duyet cap director tro xuong trong khoi","Viet KH/lead/quote/don/PO/kho/van don/QA/SOP/ticket/campaign theo khoi"],"cannot":["Ghi payment/tao no (ke toan giu)","Viet users/budget/audit","Tu duyet"]},"hr":{"dept":"hr","label":"Nhan vien HR","can":["Cham ho (checkin)","Tao/sua nhan su, tuyen dung, dao tao (employees.write)","Mo khoa user (users.unlock)","Doc HR (hr.read) + salary"],"cannot":["Viet users/refresh_tokens (auth giu)","Ghi payment/duyet tai chinh"]},"leader":{"dept":"multi","label":"To truong / Truong nhom","can":["Duyet cap leader (<5tr chi phi/PO)","De xuat approval"],"cannot":["Duyet vuot cap","Viet users/budget/audit/salary"]},"legal":{"dept":"legal","label":"Phap che","can":["Duyet buoc legal (hop dong >=50tr / note rui ro)","Doc approvals + audit (audit.read)"],"cannot":["Duyet buoc tien (leader/manager/cfo/ceo)","Tao don/thanh toan/kho"]},"manager":{"dept":"multi","label":"Truong phong","can":["Duyet cap manager (<50tr) + thay leader","Viet theo khoi: sales (KH/lead/quote/don), supply (PO/kho/van don/san pham), CSKH (ticket), IT (incident), marketing (campaign), HR (nhan su)","Tao SOP/QA/product-feature/rui ro"],"cannot":["Ghi payment/tao no/chi phi (ke toan giu)","Viet users/budget/audit","Tu duyet","Duyet vuot cap (cfo/ceo)"]},"owner":{"dept":"ceo","label":"Chu so huu","can":["Toan quyen (board covers all)","Viet users","Xem audit + password_hash"],"cannot":["Tu duyet de xuat cua chinh minh"]},"sales":{"dept":"sales","label":"Nhan vien Kinh doanh","can":["Tao lead/KH/quote/contract/don (leads/customers/quotes/orders.write)","Chat (chat.write)"],"cannot":["Huy don da co payment (phai refund)","Sua kho/tai chinh truc tiep","Duyet","Xem luong/audit"]},"staff":{"dept":"multi","label":"Nhan vien (chung)","can":["Cham cong cua minh","Ghi QA (qa.write) + SOP doc","Tao IT incident (it.write)","De xuat approval"],"cannot":["Tao don/thanh toan","Xem luong/audit/tai chinh chi tiet"]},"warehouse":{"dept":"supply","label":"Nhan vien Kho","can":["Nhap/xuat kho (stock.write)","Tao/cap nhat van don (shipments.write)","Tao san pham (products.write)","Ghi QA (qa.write)"],"cannot":["Tao don/thanh toan/tao no","Duyet","Xem luong/audit"]}}}
+{
+  "field_filter": {
+    "employees.salary_base": {
+      "allow": [
+        "cfo",
+        "ceo",
+        "hr",
+        "owner"
+      ],
+      "deny_message": "FORBIDDEN salary"
+    },
+    "users.password_hash": {
+      "allow": [
+        "owner"
+      ],
+      "deny_message": "FORBIDDEN"
+    }
+  },
+  "matrix": {
+    "approvals.decide": [
+      "leader",
+      "manager",
+      "director",
+      "cfo",
+      "ceo",
+      "owner",
+      "legal"
+    ],
+    "approvals.read": [
+      "leader",
+      "manager",
+      "director",
+      "cfo",
+      "ceo",
+      "owner",
+      "legal",
+      "hr",
+      "accountant"
+    ],
+    "approvals.request": [
+      "accountant",
+      "cskh",
+      "hr",
+      "leader",
+      "manager",
+      "director",
+      "sales",
+      "staff",
+      "warehouse",
+      "cfo",
+      "ceo",
+      "owner",
+      "legal"
+    ],
+    "attendance.checkin": [
+      "*"
+    ],
+    "audit.read": [
+      "cfo",
+      "ceo",
+      "legal",
+      "owner"
+    ],
+    "budgets.write": [
+      "cfo",
+      "ceo",
+      "owner"
+    ],
+    "campaigns.write": [
+      "ceo",
+      "director",
+      "manager",
+      "owner"
+    ],
+    "chat.write": [
+      "cskh",
+      "sales",
+      "manager",
+      "director",
+      "ceo",
+      "owner"
+    ],
+    "customers.write": [
+      "manager",
+      "sales",
+      "director",
+      "coo",
+      "ceo",
+      "owner"
+    ],
+    "debts.write": [
+      "accountant",
+      "cfo",
+      "ceo",
+      "owner"
+    ],
+    "employees.write": [
+      "hr",
+      "manager",
+      "director",
+      "ceo",
+      "owner"
+    ],
+    "expenses.write": [
+      "accountant",
+      "cfo",
+      "ceo",
+      "owner"
+    ],
+    "finance.read": [
+      "accountant",
+      "cfo",
+      "ceo",
+      "owner",
+      "coo",
+      "director"
+    ],
+    "hr.read": [
+      "hr",
+      "manager",
+      "director",
+      "ceo",
+      "owner",
+      "cfo"
+    ],
+    "it.write": [
+      "manager",
+      "staff",
+      "director",
+      "ceo",
+      "owner"
+    ],
+    "leads.write": [
+      "manager",
+      "sales",
+      "director",
+      "ceo",
+      "owner"
+    ],
+    "orders.read": [
+      "accountant",
+      "cskh",
+      "sales",
+      "warehouse",
+      "manager",
+      "director",
+      "coo",
+      "ceo",
+      "owner"
+    ],
+    "orders.write": [
+      "sales",
+      "manager",
+      "director",
+      "coo",
+      "ceo",
+      "owner"
+    ],
+    "payments.write": [
+      "accountant",
+      "cfo",
+      "ceo",
+      "owner"
+    ],
+    "po.write": [
+      "manager",
+      "director",
+      "coo",
+      "cfo",
+      "ceo",
+      "owner"
+    ],
+    "productfeat.write": [
+      "manager",
+      "director",
+      "ceo",
+      "owner"
+    ],
+    "products.write": [
+      "warehouse",
+      "manager",
+      "director",
+      "coo",
+      "owner"
+    ],
+    "qa.write": [
+      "manager",
+      "director",
+      "ceo",
+      "owner",
+      "cfo",
+      "coo",
+      "staff",
+      "warehouse"
+    ],
+    "quotes.write": [
+      "manager",
+      "sales",
+      "director",
+      "ceo",
+      "owner"
+    ],
+    "risks.write": [
+      "manager",
+      "director",
+      "ceo",
+      "owner"
+    ],
+    "shipments.write": [
+      "warehouse",
+      "manager",
+      "director",
+      "coo",
+      "owner"
+    ],
+    "sop.write": [
+      "manager",
+      "director",
+      "ceo",
+      "owner",
+      "coo"
+    ],
+    "stock.write": [
+      "warehouse",
+      "manager",
+      "director",
+      "coo",
+      "owner"
+    ],
+    "tickets.write": [
+      "cskh",
+      "manager",
+      "director",
+      "ceo",
+      "owner"
+    ],
+    "users.unlock": [
+      "hr",
+      "ceo",
+      "owner"
+    ],
+    "users.write": [
+      "ceo",
+      "owner"
+    ]
+  },
+  "notes": [
+    "x-user-code chi dev, prod fail-fast neu NODE_ENV=production ma dung",
+    "checkin gan JWT: employee_code phai bang user.employee_code tru hr/manager+",
+    "GET /api/employees loc salary_base: chi owner,ceo,hr,cfo thay",
+    "attendance.checkin '*' = moi role dang nhap"
+  ],
+  "role_scopes": {
+    "accountant": {
+      "dept": "finance",
+      "label": "Nhan vien Ke toan",
+      "can": [
+        "Doc don (read)",
+        "Tao receivable/payable (debts.write)",
+        "Ghi payment (payments.write)",
+        "Import sao ke + doi soat (payments.write)",
+        "Tao chi phi (expenses.write) — tu sinh approval",
+        "Nhac no (debts.write)"
+      ],
+      "cannot": [
+        "Sua don/kho/van don truc tiep",
+        "Duyet approval",
+        "Xem audit",
+        "Sua luong"
+      ],
+      "scope_read": "dept"
+    },
+    "ceo": {
+      "dept": "ceo",
+      "label": "Giam doc dieu hanh",
+      "can": [
+        "Doc toan bo",
+        "Duyet cap ceo (<200tr) + thay cap duoi",
+        "Viet users (users.write)",
+        "Xem audit + salary"
+      ],
+      "cannot": [
+        "Tu duyet de xuat cua chinh minh"
+      ],
+      "scope_read": "all"
+    },
+    "cfo": {
+      "dept": "finance",
+      "label": "Giam doc Tai chinh",
+      "can": [
+        "Duyet cap cfo (<200tr chi phi/PO)",
+        "Ghi payment, tao no/chi phi, budget",
+        "Xem audit + salary"
+      ],
+      "cannot": [
+        "Sua don/kho truc tiep (qua sales.setOrderPaid)",
+        "Tu duyet"
+      ],
+      "scope_read": "dept"
+    },
+    "coo": {
+      "dept": "ceo",
+      "label": "Giam doc Van hanh",
+      "can": [
+        "Tao/sua don, KH, PO, nhap/xuat kho, van don",
+        "Doc finance (finance.read)"
+      ],
+      "cannot": [
+        "Ghi payment/tao no (cua ke toan)",
+        "Duyet approval",
+        "Xem audit/salary"
+      ],
+      "scope_read": "all"
+    },
+    "cskh": {
+      "dept": "cskh",
+      "label": "Nhan vien CSKH",
+      "can": [
+        "Doc don (orders.read)",
+        "Tao/sua ticket + rating (tickets.write)",
+        "Chat (chat.write)",
+        "De xuat approval (approvals.request)"
+      ],
+      "cannot": [
+        "Tao don/thanh toan/kho",
+        "Duyet",
+        "Xem tai chinh/nhan su chi tiet"
+      ],
+      "scope_read": "dept"
+    },
+    "director": {
+      "dept": "multi",
+      "label": "Giam doc khoi (Truong khoi)",
+      "can": [
+        "Duyet cap director tro xuong trong khoi",
+        "Viet KH/lead/quote/don/PO/kho/van don/QA/SOP/ticket/campaign theo khoi"
+      ],
+      "cannot": [
+        "Ghi payment/tao no (ke toan giu)",
+        "Viet users/budget/audit",
+        "Tu duyet"
+      ],
+      "scope_read": "dept"
+    },
+    "hr": {
+      "dept": "hr",
+      "label": "Nhan vien HR",
+      "can": [
+        "Cham ho (checkin)",
+        "Tao/sua nhan su, tuyen dung, dao tao (employees.write)",
+        "Mo khoa user (users.unlock)",
+        "Doc HR (hr.read) + salary"
+      ],
+      "cannot": [
+        "Viet users/refresh_tokens (auth giu)",
+        "Ghi payment/duyet tai chinh"
+      ],
+      "scope_read": "all"
+    },
+    "leader": {
+      "dept": "multi",
+      "label": "To truong / Truong nhom",
+      "can": [
+        "Duyet cap leader (<5tr chi phi/PO)",
+        "De xuat approval"
+      ],
+      "cannot": [
+        "Duyet vuot cap",
+        "Viet users/budget/audit/salary"
+      ],
+      "scope_read": "dept"
+    },
+    "legal": {
+      "dept": "legal",
+      "label": "Phap che",
+      "can": [
+        "Duyet buoc legal (hop dong >=50tr / note rui ro)",
+        "Doc approvals + audit (audit.read)"
+      ],
+      "cannot": [
+        "Duyet buoc tien (leader/manager/cfo/ceo)",
+        "Tao don/thanh toan/kho"
+      ],
+      "scope_read": "dept"
+    },
+    "manager": {
+      "dept": "multi",
+      "label": "Truong phong",
+      "can": [
+        "Duyet cap manager (<50tr) + thay leader",
+        "Viet theo khoi: sales (KH/lead/quote/don), supply (PO/kho/van don/san pham), CSKH (ticket), IT (incident), marketing (campaign), HR (nhan su)",
+        "Tao SOP/QA/product-feature/rui ro"
+      ],
+      "cannot": [
+        "Ghi payment/tao no/chi phi (ke toan giu)",
+        "Viet users/budget/audit",
+        "Tu duyet",
+        "Duyet vuot cap (cfo/ceo)"
+      ],
+      "scope_read": "dept"
+    },
+    "owner": {
+      "dept": "ceo",
+      "label": "Chu so huu",
+      "can": [
+        "Toan quyen (board covers all)",
+        "Viet users",
+        "Xem audit + password_hash"
+      ],
+      "cannot": [
+        "Tu duyet de xuat cua chinh minh"
+      ],
+      "scope_read": "all"
+    },
+    "sales": {
+      "dept": "sales",
+      "label": "Nhan vien Kinh doanh",
+      "can": [
+        "Tao lead/KH/quote/contract/don (leads/customers/quotes/orders.write)",
+        "Chat (chat.write)"
+      ],
+      "cannot": [
+        "Huy don da co payment (phai refund)",
+        "Sua kho/tai chinh truc tiep",
+        "Duyet",
+        "Xem luong/audit"
+      ],
+      "scope_read": "dept"
+    },
+    "staff": {
+      "dept": "multi",
+      "label": "Nhan vien (chung)",
+      "can": [
+        "Cham cong cua minh",
+        "Ghi QA (qa.write) + SOP doc",
+        "Tao IT incident (it.write)",
+        "De xuat approval"
+      ],
+      "cannot": [
+        "Tao don/thanh toan",
+        "Xem luong/audit/tai chinh chi tiet"
+      ],
+      "scope_read": "own"
+    },
+    "warehouse": {
+      "dept": "supply",
+      "label": "Nhan vien Kho",
+      "can": [
+        "Nhap/xuat kho (stock.write)",
+        "Tao/cap nhat van don (shipments.write)",
+        "Tao san pham (products.write)",
+        "Ghi QA (qa.write)"
+      ],
+      "cannot": [
+        "Tao don/thanh toan/tao no",
+        "Duyet",
+        "Xem luong/audit"
+      ],
+      "scope_read": "dept"
+    }
+  }
+}

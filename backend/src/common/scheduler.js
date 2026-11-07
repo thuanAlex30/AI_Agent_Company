@@ -55,7 +55,21 @@ function initScheduler() {
     } catch (e) { logger.error('cron brief fail', { msg: e.message }); }
   }, { timezone: 'Asia/Ho_Chi_Minh' });
 
-  logger.info('scheduler: 4 cron VN active');
+  // Phase 2 (P1-12): don bang refresh_tokens — xoa token het han + token
+  // da thu hoi qua 30 ngay (giu lai 30 ngay de truy vet reuse).
+  cron.schedule('30 3 * * *', async () => {
+    try {
+      const { run, nowISO, toUtcDateTime } = require('./db');
+      const cutoff = toUtcDateTime(new Date(Date.now() - 30 * 86400000));
+      const r = await run(
+        'DELETE FROM refresh_tokens WHERE expires_at < ? OR (revoked IS NOT TRUE AND created_at < ?)',
+        [nowISO(), cutoff]
+      );
+      if (r.changes) logger.info('cron 3h30: don refresh_tokens', { changes: r.changes });
+    } catch (e) { logger.error('cron don refresh_tokens fail', { msg: e.message }); }
+  }, { timezone: 'Asia/Ho_Chi_Minh' });
+
+  logger.info('scheduler: cron VN active');
 }
 
 module.exports = { initScheduler };

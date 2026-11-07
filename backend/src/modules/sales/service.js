@@ -1,5 +1,6 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
+const { setBusinessScope, resolveResourceDept } = require('../../common/scope');
 
 const ORDER_FLOW = ['draft', 'pending_approval', 'pending', 'approved', 'in_progress', 'done', 'paid', 'partial', 'cancelled', 'refunded'];
 
@@ -21,7 +22,11 @@ async function readOnhand(c, sku) {
   return Number(row?.s || 0);
 }
 
-async function createOrder(conn, { code, customer_id, items, employee_id = null, created_by = null, idempotency_key = null, contract_id = null }) {
+// Phase 1 (P0-1): quy uoc moi cho signature:
+//   - `created_by` = ID NGUOI (SO) -> cot BIGINT
+//   - `actor`      = USERNAME (TEXT) -> audit_log.actor
+// Mac dinh created_by = null (nghiep vu tu dong: cron/webhook/storefront).
+async function createOrder(conn, { code, customer_id, items, employee_id = null, created_by = null, actor = null, idempotency_key = null, contract_id = null }) {
   return withTx(async (c) => {
     if (!code || !customer_id || !Array.isArray(items) || items.length === 0) {
       throw new AppError('VALIDATION', 'Don can code + customer + items', 400);
@@ -83,21 +88,24 @@ async function createOrder(conn, { code, customer_id, items, employee_id = null,
       throw e;
     }
     const orderId = r.lastInsertRowid || (await c.get('SELECT id FROM orders WHERE code=?', [code]))?.id;
+    // Phase 3 (P0-4): gan phong ban cho don (de scope list + IDOR check hoat dong).
+    const orderDept = await resolveResourceDept(c, 'orders', { ownerEmployeeId: employee_id });
+    await setBusinessScope(c, 'orders', orderId, orderDept, employee_id);
     for (const it of items) {
       const p = await c.get('SELECT price, cost FROM products WHERE sku=?', [it.sku]);
       await c.run('INSERT INTO order_items(order_id,product_sku,qty,price,cost) VALUES(?,?,?,?,?)', [orderId, it.sku, it.qty, p.price, p.cost]);
     }
-    await writeAudit(c, created_by || 'system', 'create', 'orders', orderId, null, { code, amount, status });
+    await writeAudit(c, actor || 'system', 'create', 'orders', orderId, null, { code, amount, status });
     // qua module khac bang service (giu bien ownership)
     const supplyService = require('../supply/service');
     const financeService = require('../finance/service');
     for (const it of items) {
-      await supplyService.moveStock(c, { sku: it.sku, type: 'out', qty: -Math.abs(it.qty), ref_code: code, created_by, idempotency_key: idempotency_key ? `stk-${idempotency_key}-${it.sku}` : null });
+      await supplyService.moveStock(c, { sku: it.sku, type: 'out', qty: -Math.abs(it.qty), ref_code: code, created_by, actor, idempotency_key: idempotency_key ? `stk-${idempotency_key}-${it.sku}` : null });
     }
-    const { todayVN: t2 } = require('../../common/db');
-    const d = new Date(t2()); d.setDate(d.getDate() + 7);
-    await financeService.createReceivable(c, { customer_id, order_id: orderId, amount, due_date: d.toISOString().slice(0, 10), created_by, note: `Cong no ${code}` });
-    await supplyService.createShipment(c, { order_id: orderId, created_by });
+    // Phase 0.5: due_date = ngay VN + 7 (khong di qua Date/UTC).
+    const { businessDayVN } = require('../../common/db');
+    await financeService.createReceivable(c, { customer_id, order_id: orderId, amount, due_date: businessDayVN(7), created_by, actor, note: `Cong no ${code}` });
+    await supplyService.createShipment(c, { order_id: orderId, created_by, actor, dept: orderDept });
     return { id: orderId, amount, status };
   }, conn);
 }
@@ -120,7 +128,7 @@ async function setOrderPaid(conn, orderId, actor) {
   }, conn);
 }
 
-async function cancelOrder(conn, orderId, actor) {
+async function cancelOrder(conn, orderId, actor, actor_id = null) {
   return withTx(async (c) => {
     const o = await c.get('SELECT * FROM orders WHERE id=?', [orderId]);
     if (!o) throw new AppError('NOT_FOUND', 'Khong tim thay don', 404);
@@ -133,7 +141,7 @@ async function cancelOrder(conn, orderId, actor) {
     const supplyService = require('../supply/service');
     const financeService = require('../finance/service');
     for (const it of items) {
-      await supplyService.moveStock(c, { sku: it.product_sku, type: 'in', qty: Math.abs(it.qty), ref_code: `CANCEL-${o.code}`, created_by: actor });
+      await supplyService.moveStock(c, { sku: it.product_sku, type: 'in', qty: Math.abs(it.qty), ref_code: `CANCEL-${o.code}`, created_by: actor_id, actor });
     }
     await c.run('UPDATE orders SET status=? WHERE id=?', ['cancelled', orderId]);
     await financeService.markDebtCancelled(c, orderId, actor);
@@ -142,7 +150,7 @@ async function cancelOrder(conn, orderId, actor) {
   }, conn);
 }
 
-async function refundOrder(conn, orderId, actor) {
+async function refundOrder(conn, orderId, actor, actor_id = null) {
   return withTx(async (c) => {
     const o = await c.get('SELECT * FROM orders WHERE id=?', [orderId]);
     if (!o) throw new AppError('NOT_FOUND', 'Khong tim thay don', 404);
@@ -157,7 +165,7 @@ async function refundOrder(conn, orderId, actor) {
     }
     const items = await c.query('SELECT * FROM order_items WHERE order_id=?', [orderId]);
     for (const it of items) {
-      await supplyService.moveStock(c, { sku: it.product_sku, type: 'in', qty: Math.abs(it.qty), ref_code: `REFUND-${o.code}`, created_by: actor });
+      await supplyService.moveStock(c, { sku: it.product_sku, type: 'in', qty: Math.abs(it.qty), ref_code: `REFUND-${o.code}`, created_by: actor_id, actor });
     }
     await c.run('UPDATE orders SET status=? WHERE id=?', ['refunded', orderId]);
     await financeService.markDebtCancelled(c, orderId, actor);
@@ -178,6 +186,9 @@ async function convertLead(conn, leadId, actor) {
     else {
       const r = await c.run('INSERT INTO customers(code,name,phone,type,owner_employee_id) VALUES(?,?,?,?,?)', [code, lead.name, lead.phone, 'retail', lead.owner_employee_id]);
       customerId = r.lastInsertRowid || (await c.get('SELECT id FROM customers WHERE code=?', [code]))?.id;
+      // Phase 3: gan phong ban cho KH vua tao.
+      const custDept = await resolveResourceDept(c, 'customers', { ownerEmployeeId: lead.owner_employee_id });
+      await setBusinessScope(c, 'customers', customerId, custDept, lead.owner_employee_id);
     }
     await c.run('UPDATE leads SET stage=? WHERE id=?', ['won', leadId]);
     await writeAudit(c, actor || 'system', 'update', 'leads', leadId, { stage: lead.stage }, { stage: 'won', customer_id: customerId });

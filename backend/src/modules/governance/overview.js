@@ -1,105 +1,189 @@
 const { todayVN, sinceVN } = require('../../common/db');
 
 // overview 12 khoi + ceo. Moi khoi try/catch rieng — 1 skill loi khong sap overview.
+//
+// Phase 3 (P0-5): KHONG ai duoc xem toan bo du lieu cong ty.
+//   - `getOverview(conn, user)` — moi khoi co guard theo phong ban/scope.
+//   - Vai toan cuc (owner/ceo) => xem het.
+//   - Vai theo khoi (director/manager/leader) => chi khoi cua minh.
+//   - accountant/cfo => tai chinh + KPI tai chinh, KHONG thay luong/ton kho chi tiet.
+//   - staff => CHI ticket cua minh + IT incident cua minh + QA cua minh.
+const scopeMod = require('../../common/scope');
+
+// 1 khoi loi -> tra placeholder (khong lo du lieu)
 async function safe(fn, fallback) {
   try { return await fn(); }
   catch (e) { return { status: 'error', message: String(e.message || e).slice(0, 120) }; }
 }
 
-async function getOverview(conn) {
+const HIDDEN = { hidden: true };
+
+async function getOverview(conn, user) {
   const db = require('../../common/db');
   const c = (conn && conn.run) ? conn : db;
   const out = {};
+  // `user` = null => goi NỘI BỘ (CLI/agent) khong gắn user => xem het
+  // (tuong thich ham goc). Route HTTP LUON truyen req.user => co scope that.
+  const internal = !user;
+  const s = scopeMod.resolveScope(user || { role: 'owner' });
+  const want = (dept) => (internal ? true : scopeMod.canAccessDept(user || {}, dept));
+  const isGlobal = internal || s.allDepts;
 
-  out.ceo = await safe(async () => {
-    const emp = await c.get("SELECT COUNT(*) c FROM employees WHERE status IN ('active','probation')");
-    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
-    const appr = await c.get("SELECT COUNT(*) c FROM approvals WHERE status='pending'");
-    return { headcount: Number(emp?.c || 0), revenue30d: Number(rev?.s || 0), approvals_pending: Number(appr?.c || 0) };
-  });
+  // --- CEO: chi owner/ceo/director (khoi) ---------------------------------
+  if (isGlobal || want('ceo')) {
+    out.ceo = await safe(async () => {
+      const emp = await c.get("SELECT COUNT(*) c FROM employees WHERE status IN ('active','probation')");
+      const rev = await c.get("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
+      const appr = await c.get("SELECT COUNT(*) c FROM approvals WHERE status='pending'");
+      return { headcount: Number(emp?.c || 0), revenue30d: Number(rev?.s || 0), approvals_pending: Number(appr?.c || 0) };
+    });
+  } else {
+    out.ceo = HIDDEN;
+  }
 
-  out.sales = await safe(async () => {
-    const rev = await c.get("SELECT COALESCE(SUM(amount),0) s, COUNT(*) co FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
-    const won = await c.get("SELECT COUNT(*) c FROM leads WHERE stage='won'");
-    const lost = await c.get("SELECT COUNT(*) c FROM leads WHERE stage='lost'");
-    const w = Number(won?.c || 0), l = Number(lost?.c || 0);
-    const win_rate = (w + l) ? Math.round(w / (w + l) * 1000) / 10 : 0;
-    // retention = khach >=2 don / khach >=1 don (glossary v6.1)
-    const r1 = await c.get('SELECT COUNT(DISTINCT customer_id) c FROM orders WHERE status NOT IN (\'cancelled\',\'refunded\',\'draft\')');
-    const r2 = await c.get('SELECT COUNT(*) c FROM (SELECT customer_id FROM orders WHERE status NOT IN (\'cancelled\',\'refunded\',\'draft\') GROUP BY customer_id HAVING COUNT(*) >= 2)');
-    const retention = Number(r1?.c || 0) ? Math.round(Number(r2?.c || 0) / Number(r1.c) * 1000) / 10 : 0;
-    return { revenue30d: Number(rev?.s || 0), orders30d: Number(rev?.co || 0), win_rate, retention };
-  });
+  // --- SALES --------------------------------------------------------------
+  if (want('sales')) {
+    out.sales = await safe(async () => {
+      const rev = await c.get("SELECT COALESCE(SUM(amount),0) s, COUNT(*) co FROM orders WHERE order_date >= ? AND status NOT IN ('cancelled','refunded','draft')", [sinceVN(30)]);
+      const won = await c.get("SELECT COUNT(*) c FROM leads WHERE stage='won'");
+      const lost = await c.get("SELECT COUNT(*) c FROM leads WHERE stage='lost'");
+      const w = Number(won?.c || 0), l = Number(lost?.c || 0);
+      const win_rate = (w + l) ? Math.round(w / (w + l) * 1000) / 10 : 0;
+      // retention = khach >=2 don / khach >=1 don (glossary v6.1)
+      const r1 = await c.get('SELECT COUNT(DISTINCT customer_id) c FROM orders WHERE status NOT IN (\'cancelled\',\'refunded\',\'draft\')');
+      const r2 = await c.get('SELECT COUNT(*) c FROM (SELECT customer_id FROM orders WHERE status NOT IN (\'cancelled\',\'refunded\',\'draft\') GROUP BY customer_id HAVING COUNT(*) >= 2)');
+      const retention = Number(r1?.c || 0) ? Math.round(Number(r2?.c || 0) / Number(r1.c) * 1000) / 10 : 0;
+      return { revenue30d: Number(rev?.s || 0), orders30d: Number(rev?.co || 0), win_rate, retention };
+    });
+  } else {
+    out.sales = HIDDEN;
+  }
 
-  out.marketing = await safe(async () => {
-    const rows = await c.query('SELECT * FROM v_campaign_roi');
-    const leads = rows.reduce((s, r) => s + Number(r.leads || 0), 0);
-    const orders = rows.reduce((s, r) => s + Number(r.orders || 0), 0);
-    const cost = rows.reduce((s, r) => s + Number(r.cost || 0), 0);
-    return { campaigns: rows.length, leads, orders, cost };
-  });
+  // --- MARKETING ----------------------------------------------------------
+  if (want('marketing')) {
+    out.marketing = await safe(async () => {
+      const rows = await c.query('SELECT * FROM v_campaign_roi');
+      const leads = rows.reduce((s, r) => s + Number(r.leads || 0), 0);
+      const orders = rows.reduce((s, r) => s + Number(r.orders || 0), 0);
+      const cost = rows.reduce((s, r) => s + Number(r.cost || 0), 0);
+      return { campaigns: rows.length, leads, orders, cost };
+    });
+  } else {
+    out.marketing = HIDDEN;
+  }
 
-  out.cskh = await safe(async () => {
-    const open = await c.get("SELECT COUNT(*) c FROM tickets WHERE status IN ('open','processing')");
-    const breach = await c.get('SELECT COUNT(*) c FROM v_sla_breach');
-    const csat = await c.get('SELECT AVG(stars) a, COUNT(*) c FROM ratings');
-    const res = await c.get("SELECT COUNT(*) c, COALESCE(SUM(reopen_count),0) s FROM tickets WHERE status IN ('resolved','closed')");
-    const rc = Number(res?.c || 0), rs = Number(res?.s || 0);
-    const fcr = rc ? Math.round((rc - Math.min(rs, rc)) / rc * 1000) / 10 : 100;
-    return { open: Number(open?.c || 0), sla_breach: Number(breach?.c || 0), csat_avg: csat?.a ? Math.round(Number(csat.a) * 100) / 100 : 0, fcr };
-  });
+  // --- CSKH ---------------------------------------------------------------
+  if (want('cskh')) {
+    out.cskh = await safe(async () => {
+      const open = await c.get("SELECT COUNT(*) c FROM tickets WHERE status IN ('open','processing')");
+      const breach = await c.get('SELECT COUNT(*) c FROM v_sla_breach');
+      const csat = await c.get('SELECT AVG(stars) a, COUNT(*) c FROM ratings');
+      const res = await c.get("SELECT COUNT(*) c, COALESCE(SUM(reopen_count),0) s FROM tickets WHERE status IN ('resolved','closed')");
+      const rc = Number(res?.c || 0), rs = Number(res?.s || 0);
+      const fcr = rc ? Math.round((rc - Math.min(rs, rc)) / rc * 1000) / 10 : 100;
+      return { open: Number(open?.c || 0), sla_breach: Number(breach?.c || 0), csat_avg: csat?.a ? Math.round(Number(csat.a) * 100) / 100 : 0, fcr };
+    });
+  } else {
+    out.cskh = HIDDEN;
+  }
 
-  out.ops = await safe(async () => {
-    const alerts = await c.query('SELECT p.sku, COALESCE((SELECT SUM(qty) FROM stock_moves s WHERE s.product_sku=p.sku),0) AS stock, p.stock_alert FROM products p');
-    const low = alerts.filter((r) => Number(r.stock) <= Number(r.stock_alert)).length;
-    const ship = await c.get("SELECT COUNT(*) c FROM shipments WHERE status IN ('pending','shipping')");
-    const sop = await c.get("SELECT COUNT(*) c FROM sop_tasks WHERE status='overdue'");
-    return { stock_low: low, shipments_open: Number(ship?.c || 0), sop_overdue: Number(sop?.c || 0) };
-  });
+  // --- OPS (van hanh) -----------------------------------------------------
+  if (want('ops')) {
+    out.ops = await safe(async () => {
+      const alerts = await c.query('SELECT p.sku, COALESCE((SELECT SUM(qty) FROM stock_moves s WHERE s.product_sku=p.sku),0) AS stock, p.stock_alert FROM products p');
+      const low = alerts.filter((r) => Number(r.stock) <= Number(r.stock_alert)).length;
+      const ship = await c.get("SELECT COUNT(*) c FROM shipments WHERE status IN ('pending','shipping')");
+      const sop = await c.get("SELECT COUNT(*) c FROM sop_tasks WHERE status='overdue'");
+      return { stock_low: low, shipments_open: Number(ship?.c || 0), sop_overdue: Number(sop?.c || 0) };
+    });
+  } else {
+    out.ops = HIDDEN;
+  }
 
-  out.supply = await safe(async () => {
-    const po = await c.get("SELECT COUNT(*) c FROM purchase_orders WHERE status IN ('draft','pending_approval','approved','sent')");
-    const sup = await c.get('SELECT COUNT(*) c FROM suppliers');
-    return { po_open: Number(po?.c || 0), suppliers: Number(sup?.c || 0) };
-  });
+  // --- SUPPLY -------------------------------------------------------------
+  if (want('supply')) {
+    out.supply = await safe(async () => {
+      const po = await c.get("SELECT COUNT(*) c FROM purchase_orders WHERE status IN ('draft','pending_approval','approved','sent')");
+      const sup = await c.get('SELECT COUNT(*) c FROM suppliers');
+      return { po_open: Number(po?.c || 0), suppliers: Number(sup?.c || 0) };
+    });
+  } else {
+    out.supply = HIDDEN;
+  }
 
-  out.finance = await safe(async () => {
-    const financeService = require('../finance/service');
-    return financeService.financeKpis(c);
-  });
+  // --- FINANCE ------------------------------------------------------------
+  // Chinh sach: ke toan/CFO xem KPI tai chinh toan cong ty. Nhung KHONG duoc
+  // thay luong hay ton kho chi tiet (phan `hr`/`ops` xu ly rieng).
+  if (want('finance')) {
+    out.finance = await safe(async () => {
+      const financeService = require('../finance/service');
+      return financeService.financeKpis(c);
+    });
+  } else {
+    out.finance = HIDDEN;
+  }
 
-  out.hr = await safe(async () => {
-    const total = await c.get("SELECT COUNT(*) c FROM employees WHERE status IN ('active','probation')");
-    const left = await c.get('SELECT COUNT(*) c FROM employees WHERE left_date IS NOT NULL AND left_date >= ?', [sinceVN(30)]);
-    const t = Number(total?.c || 0);
-    const turnover = t ? Math.round(Number(left?.c || 0) / t * 1000) / 10 : 0;
-    const today = todayVN();
-    const present = await c.get("SELECT COUNT(*) c FROM attendance WHERE work_date=? AND status IN ('present','late')", [today]);
-    return { headcount: t, turnover_30d: turnover, present_today: Number(present?.c || 0) };
-  });
+  // --- HR -----------------------------------------------------------------
+  // HR theo chinh sach nhan su PHẢI thay toan cong ty (scope_read='all'), nhung
+  // CHI cot luong cho role duoc quyen (field_filter).
+  const hrRole = user && user.role;
+  const hrScopeAll = isGlobal || hrRole === 'hr' || want('hr');
+  if (hrScopeAll) {
+    out.hr = await safe(async () => {
+      const total = await c.get("SELECT COUNT(*) c FROM employees WHERE status IN ('active','probation')");
+      const left = await c.get('SELECT COUNT(*) c FROM employees WHERE left_date IS NOT NULL AND left_date >= ?', [sinceVN(30)]);
+      const t = Number(total?.c || 0);
+      const turnover = t ? Math.round(Number(left?.c || 0) / t * 1000) / 10 : 0;
+      const today = todayVN();
+      const present = await c.get("SELECT COUNT(*) c FROM attendance WHERE work_date=? AND status IN ('present','late')", [today]);
+      return { headcount: t, turnover_30d: turnover, present_today: Number(present?.c || 0) };
+    });
+  } else {
+    out.hr = HIDDEN;
+  }
 
-  out.it = await safe(async () => {
-    const itService = require('../it/service');
-    return itService.health(c);
-  });
+  // --- IT -----------------------------------------------------------------
+  if (want('it')) {
+    out.it = await safe(async () => {
+      const itService = require('../it/service');
+      return itService.health(c);
+    });
+  } else {
+    out.it = HIDDEN;
+  }
 
-  out.legal = await safe(async () => {
-    const pend = await c.get("SELECT COUNT(*) c FROM contracts WHERE status IN ('pending_approval','legal_review')");
-    const risks = await c.get("SELECT COUNT(*) c FROM risks WHERE status='open'");
-    return { contracts_pending: Number(pend?.c || 0), risks_open: Number(risks?.c || 0) };
-  });
+  // --- LEGAL --------------------------------------------------------------
+  if (want('legal')) {
+    out.legal = await safe(async () => {
+      const pend = await c.get("SELECT COUNT(*) c FROM contracts WHERE status IN ('pending_approval','legal_review')");
+      const risks = await c.get("SELECT COUNT(*) c FROM risks WHERE status='open'");
+      return { contracts_pending: Number(pend?.c || 0), risks_open: Number(risks?.c || 0) };
+    });
+  } else {
+    out.legal = HIDDEN;
+  }
 
-  out.qa = await safe(async () => {
-    const qaService = require('../qa/service');
-    return qaService.stats(c);
-  });
+  // --- QA -----------------------------------------------------------------
+  if (want('qa')) {
+    out.qa = await safe(async () => {
+      const qaService = require('../qa/service');
+      return qaService.stats(c);
+    });
+  } else {
+    out.qa = HIDDEN;
+  }
 
-  out.product = await safe(async () => {
-    const rows = await c.query('SELECT stage, COUNT(*) c FROM product_features GROUP BY stage');
-    const byStage = {};
-    for (const r of rows) byStage[r.stage] = Number(r.c);
-    return { by_stage: byStage, total: rows.reduce((s, r) => s + Number(r.c), 0) };
-  });
+  // --- PRODUCT ------------------------------------------------------------
+  if (want('product')) {
+    out.product = await safe(async () => {
+      const rows = await c.query('SELECT stage, COUNT(*) c FROM product_features GROUP BY stage');
+      const byStage = {};
+      for (const r of rows) byStage[r.stage] = Number(r.c);
+      return { by_stage: byStage, total: rows.reduce((s, r) => s + Number(r.c), 0) };
+    });
+  } else {
+    out.product = HIDDEN;
+  }
 
   // agent_suggestion: 5 viec co RACI + api + deadline
   const suggestions = [];
@@ -123,12 +207,13 @@ async function getOverview(conn) {
   }
   out.agent_suggestion = suggestions.slice(0, 5);
   out.generated_at = new Date().toISOString();
+  out.scope = { role: s.role, dept: s.userDept, depts: s.allDepts ? 'ALL' : s.depts };
   return out;
 }
 
 // P1 rut gon cho tab CEO 03a: chi sales/supply/finance + approvals ton
-async function getOverviewP1(conn) {
-  const full = await getOverview(conn);
+async function getOverviewP1(conn, user) {
+  const full = await getOverview(conn, user);
   return { sales: full.sales, supply: full.supply, finance: full.finance, approvals_pending: full.ceo?.approvals_pending ?? 0, generated_at: full.generated_at };
 }
 

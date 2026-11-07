@@ -106,12 +106,13 @@ router.post('/orders', publicOrderLimiter, async (req, res) => {
       if (amount <= 0) throw new AppError('VALIDATION', 'amount phai > 0', 400);
       let status = 'pending';
       if (amount >= 50000000) status = 'pending_approval';
-      const { todayVN } = require('../common/db');
+      const { todayVN, businessDayVN, toSqlDateTime } = require('../common/db');
       const code = 'DHW-' + String(Date.now()).slice(-8);
       const lookupCode = code;
       const r = await c.run(
         "INSERT INTO orders(code,customer_id,employee_id,amount,status,order_date,created_by,idempotency_key,source,lookup_code) VALUES(?,?,?,?,?,?,?, ?,?,?)",
-        [code, cust.id, null, amount, status, todayVN(), 'storefront', idemKey, 'storefront', lookupCode]
+        // Phase 1 (P0-1): created_by la BIGINT -> don web khong co user ERP => NULL.
+        [code, cust.id, null, amount, status, todayVN(), null, idemKey, 'storefront', lookupCode]
       );
       const orderId = r.lastInsertRowid || (await c.get('SELECT id FROM orders WHERE code=?', [code]))?.id;
       for (const ln of lines) {
@@ -120,22 +121,21 @@ router.post('/orders', publicOrderLimiter, async (req, res) => {
       const supplyService = require('../modules/supply/service');
       const financeService = require('../modules/finance/service');
       for (const so of stockOuts.length ? stockOuts : lines.map(l => ({ sku: l.sku, qty: -l.qty }))) {
-        await supplyService.moveStock(c, { sku: so.sku, type: 'out', qty: so.qty, ref_code: code, created_by: 'storefront', idempotency_key: idemKey ? `stk-${idemKey}-${so.sku}` : null });
+        await supplyService.moveStock(c, { sku: so.sku, type: 'out', qty: so.qty, ref_code: code, created_by: null, actor: 'storefront', idempotency_key: idemKey ? `stk-${idemKey}-${so.sku}` : null });
       }
-      const d = new Date(todayVN()); d.setDate(d.getDate() + 7);
-      await financeService.createReceivable(c, { customer_id: cust.id, order_id: orderId, amount, due_date: d.toISOString().slice(0, 10), created_by: 'storefront', note: `Cong no ${code} (${payMethod})` });
-      await supplyService.createShipment(c, { order_id: orderId, created_by: 'storefront' });
+      // Phase 0.5: due_date = ngay VN + 7.
+      await financeService.createReceivable(c, { customer_id: cust.id, order_id: orderId, amount, due_date: businessDayVN(7), created_by: null, actor: 'storefront', note: `Cong no ${code} (${payMethod})` });
+      await supplyService.createShipment(c, { order_id: orderId, created_by: null, actor: 'storefront' });
       // Ticket CSKH liên kết đơn (helpdesk sở hữu tickets)
       const hd = require('../modules/helpdesk/service');
       const tck = await hd.createTicket(c, { customer_id: cust.id, category: 'easy', subject: `Don web ${code}`, content: `KH ${name} ${phone} dat ${lines.map(l => l.sku + 'x' + l.qty).join(', ')} — ${note}`.slice(0, 500), priority: 'normal', actor: 'storefront' });
       try { await c.run('UPDATE tickets SET order_id=? WHERE id=?', [orderId, tck.id]); } catch {}
       const { writeAudit } = require('../common/audit');
       await writeAudit(c, 'storefront', 'create', 'orders', orderId, null, { code, amount, status, source: 'storefront' });
-      // Lookup token phụ (30 ngày)
+      // Lookup token phụ (30 ngày) — Phase 0.6: dinh dang timestamp thong nhat.
       const rawTok = lookupToken();
       const tokHash = crypto.createHash('sha256').update(rawTok).digest('hex');
-      const exp = new Date(); exp.setDate(exp.getDate() + 30);
-      await c.run('INSERT INTO order_lookup_tokens(order_id,token_hash,expires_at) VALUES(?,?,?)', [orderId, tokHash, exp.toISOString().slice(0, 19).replace('T', ' ')]);
+      await c.run('INSERT INTO order_lookup_tokens(order_id,token_hash,expires_at) VALUES(?,?,?)', [orderId, tokHash, toSqlDateTime(new Date(Date.now() + 30 * 86400000))]);
       return { id: orderId, code, amount, status, lookup_token: rawTok, ticket: tck.code, customer_id: cust.id };
     });
     return ok(res, out);

@@ -29,8 +29,10 @@ const mig = read(path.join(ROOT, 'src/db/migrations/001_init.sql'));
 const mig2 = read(path.join(ROOT, 'src/db/migrations/002_storefront.sql'));
 const migPg = read(path.join(ROOT, 'src/db/migrations/001_init.postgres.sql'));
 const migPg2 = read(path.join(ROOT, 'src/db/migrations/002_storefront.postgres.sql'));
-const migAll = mig + '\n' + mig2;
-const migPgAll = migPg + '\n' + migPg2;
+const mig3 = read(path.join(ROOT, 'src/db/migrations/003_datetime_normalize.sql'));
+const migPg3 = read(path.join(ROOT, 'src/db/migrations/003_datetime_normalize.postgres.sql'));
+const migAll = mig + '\n' + mig2 + '\n' + mig3;
+const migPgAll = migPg + '\n' + migPg2 + '\n' + migPg3;
 if (!mig) ok(false, 'thieu 001_init.sql');
 else {
   for (const t of manifest.tables) ok(new RegExp('CREATE TABLE[^;]*\\b' + t + '\\b', 'i').test(migAll), 'migration co bang ' + t);
@@ -39,8 +41,10 @@ else {
   ok(/ON CONFLICT.*DO NOTHING/i.test(migAll + migPgAll), 'dung ON CONFLICT DO NOTHING');
   ok(!/RAISE ABORT/i.test(migAll), 'cam RAISE ABORT trong file chung (de vao file dialect)');
   ok(!/PRAGMA/i.test(migAll), 'cam PRAGMA trong migration (chi duoc trong db.js runtime)');
-  ok(!/DATETIME/i.test(migAll), 'cam DATETIME (dung TIMESTAMP)');
-  ok(!/GLOB/i.test(migAll), 'cam GLOB (khong ANSI; check month bang CHECK month LIKE \'____-__\' hoac regex dialect)');
+  // Chi kiem tra PHAN CODE cua migration (bo comment -- va khong kiem tra ten file).
+  const migCode = (migAll + '\n' + migPgAll).split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+  ok(!/DATETIME/i.test(migCode), 'cam DATETIME (dung TIMESTAMP)');
+  ok(!/GLOB/i.test(migCode), 'cam GLOB (khong ANSI; check month bang CHECK month LIKE \'____-__\' hoac regex dialect)');
 }
 if (mig) for (const [k, vals] of Object.entries(enums)) for (const v of vals) ok(migAll.includes(v), 'enum ' + k + '.' + v + ' co trong migration');
 
@@ -129,12 +133,17 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
 // 9. DB-01 v7: lint cam SQL dac thu SQLite trong src (ngoai db.js + migrations SQLite + seeds demo)
 (function lintSqliteOnly() {
   const FORBIDDEN = [
-    [/datetime\s*\(/i, 'datetime('],
-    [/date\s*\(\s*'now'/i, "date('now'"],
-    [/strftime\s*\(/i, 'strftime('],
+    [/(?<![\w.])datetime\s*\(/i, 'datetime('],
+    [/(?<![\w.])date\s*\(\s*'now'/i, "date('now'"],
+    [/(?<!new\s)(?<![\w.])date\s*\(\s*[a-z_][a-z0-9_.]*/i, 'date(<col>) — SQLite-only, dung CAST(col AS TEXT)'],
+    [/(?<![\w.])strftime\s*\(/i, 'strftime('],
+    [/(?<![\w.])julianday\s*\(/i, 'julianday('],
     [/INSERT\s+OR\s+(IGNORE|REPLACE)/i, 'INSERT OR IGNORE/REPLACE'],
-    [/AUTOINCREMENT/i, 'AUTOINCREMENT'],
+    [/\bAUTOINCREMENT\b/i, 'AUTOINCREMENT'],
+    [/(?<![\w.])IFNULL\s*\(/i, 'IFNULL('],
   ];
+  // Dong duoc coi la "ung vien SQL" khi chua dau hieu SQL ro rang.
+  const SQL_HINT = /\b(SELECT|INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|FROM\s+\w|WHERE|ORDER\s+BY|GROUP\s+BY|SUM\(|COUNT\(|CASE\s+WHEN)\b/i;
   const bad = [];
   for (const f of files) {
     const rel = String(f).replace(/\\/g, '/');
@@ -145,12 +154,20 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
     const src = read(f);
     const lines = src.split('\n');
     lines.forEach((line, i) => {
-      // bo qua comment giai thich lint
-      if (/lint trong verify|khong dung datetime|Khong dung datetime/.test(line)) return;
+      const code = line.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/, '').trim();
+      if (!code) return;
+      const looksSql = SQL_HINT.test(code);
       for (const [re, tag] of FORBIDDEN) {
-        if (re.test(line)) { bad.push(`${f}:${i + 1} [${tag}] ${line.trim().slice(0, 110)}`); break; }
+        if (!re.test(code)) continue;
+        // `date(...)` chi co gia tri khi dong la SQL; cac ham JS (update/digest/...)
+        // khong phai SQLite-only.
+        if (tag.startsWith('date(') && !looksSql) continue;
+        bad.push(`${f}:${i + 1} [${tag}] ${code.slice(0, 110)}`);
+        break;
       }
-      if (/PRAGMA/i.test(line) && !/db\.js/.test(rel)) bad.push(`${f}:${i + 1} [PRAGMA] ${line.trim().slice(0, 110)}`);
+      if (/\bPRAGMA\b/i.test(code) && !/common\/db\.js$/.test(rel)) {
+        bad.push(`${f}:${i + 1} [PRAGMA] ${code.slice(0, 110)}`);
+      }
     });
   }
   if (bad.length) { console.log('SQLITE-ONLY VIOLATIONS:\n' + bad.join('\n')); }
@@ -259,6 +276,296 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
   const feNginx = read(path.join(ROOT, '..', 'frontend', 'nginx.conf'));
   ok(/location\s+\/api\//.test(sfNginx) && /proxy_pass\s+http:\/\/backend:3000/.test(sfNginx), 'WEB-01: storefront nginx proxy /api -> backend');
   ok(/location\s+\/api\//.test(feNginx) && /proxy_pass\s+http:\/\/backend:3000/.test(feNginx), 'WEB-01: frontend nginx proxy /api -> backend');
+})();
+
+// ===========================================================================
+// 12. PHASE 0 — DIENH DANG / DIALECT PARITY / KIEU DU LIEU
+//     "verify.js phai bat duoc loi dialect, khong bao xanh gia" (Prompt 1.2)
+// ===========================================================================
+
+// 12.1 — Parse CREATE TABLE tu 2 file migration, so sanh TAP TEN BANG.
+(function dialectTableParity() {
+  function tablesOf(sql) {
+    const out = new Set();
+    const re = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/gi;
+    let m;
+    while ((m = re.exec(sql))) out.add(m[1].toLowerCase());
+    return out;
+  }
+  const tSql = tablesOf(migAll);
+  const tPg = tablesOf(migPgAll);
+  const onlySql = [...tSql].filter((t) => !tPg.has(t));
+  const onlyPg = [...tPg].filter((t) => !tSql.has(t));
+  ok(onlySql.length === 0, 'dialect parity: khong bang chi co o SQLite' + (onlySql.length ? ' (' + onlySql.join(', ') + ')' : ''));
+  ok(onlyPg.length === 0, 'dialect parity: khong bang chi co o PostgreSQL' + (onlyPg.length ? ' (' + onlyPg.join(', ') + ')' : ''));
+  ok(tSql.size >= 35, 'dialect parity: so bang SQLite=' + tSql.size);
+})();
+
+// 12.2 — So sanh TAP TEN COT cho tung bang giua 2 dialect.
+(function dialectColumnParity() {
+  function parseTables(sql) {
+    const map = new Map();
+    const re = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?\s*\(/gi;
+    let m;
+    while ((m = re.exec(sql))) {
+      const name = m[1].toLowerCase();
+      // lay phan than bang: den dau `);` gan nhat (bo qua dong comment)
+      let i = re.lastIndex;
+      let depth = 1;
+      let body = '';
+      while (i < sql.length && depth > 0) {
+        const ch = sql[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') { depth--; if (depth === 0) break; }
+        body += ch;
+        i++;
+      }
+      const cols = new Set();
+      for (const raw of body.split('\n')) {
+        const line = raw.replace(/--.*$/, '').trim();
+        if (!line) continue;
+        const cm = line.match(/^["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?\s+(BIGINT|INTEGER|INT|TEXT|TIMESTAMP|TIMESTAMPTZ|DATE|BOOLEAN|NUMERIC|REAL|DOUBLE|SERIAL|BIGSERIAL|VARCHAR|JSONB|JSON|UUID|BLOB)/i);
+        if (cm) cols.add(cm[1].toLowerCase());
+      }
+      map.set(name, cols);
+    }
+    return map;
+  }
+  const mapSql = parseTables(migAll);
+  const mapPg = parseTables(migPgAll);
+  const diffs = [];
+  for (const [t, cols] of mapSql) {
+    const pgCols = mapPg.get(t);
+    if (!pgCols) continue; // 12.1 da bao loi bang thieu
+    const missing = [...cols].filter((c) => !pgCols.has(c));
+    const extra = [...pgCols].filter((c) => !cols.has(c));
+    if (missing.length || extra.length) {
+      diffs.push(t + ' [thieu o PG: ' + (missing.join(',') || '-') + ' | thua o PG: ' + (extra.join(',') || '-') + ']');
+    }
+  }
+  if (diffs.length) console.log('DIALECT COLUMN DIFF:\n' + diffs.join('\n'));
+  ok(diffs.length === 0, 'dialect parity: tap cot cua moi bang khop giua SQLite va PostgreSQL');
+})();
+
+// 12.3 — P0-1: moi cot kieu "dinh danh nguoi" (created_by/actor/requester/...)
+//     phai la kieu SO. Bat code truyen USERNAME vao cot BIGINT.
+(function actorColumnTypeCheck() {
+  const ID_COL = /^(created_by|updated_by|decided_by|approved_by|actor_id|owner_employee_id|employee_id|assignee|manager_id|requester|reviewer|handled_by|user_id|reported_by|created_by_id)$/;
+  const TEXTY = /^(actor|created_by_username|approved_by_username|decided_by_name)$/;
+  const problems = [];
+  for (const [name, sql] of [['sqlite', migAll], ['postgres', migPgAll]]) {
+    const re = /^\s*["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?\s+(BIGINT|INTEGER|INT|TEXT|TIMESTAMP|TIMESTAMPTZ|DATE|BOOLEAN|NUMERIC|REAL|DOUBLE|SERIAL|BIGSERIAL|VARCHAR|JSONB|JSON|UUID|BLOB)/i;
+    const lines = sql.split('\n');
+    let cur = null;
+    for (const raw of lines) {
+      const line = raw.replace(/--.*$/, '').trim();
+      const tm = line.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i);
+      if (tm) { cur = tm[1].toLowerCase(); continue; }
+      const cm = line.match(re);
+      if (!cm || !cur) continue;
+      const col = cm[1].toLowerCase();
+      const type = cm[2].toUpperCase();
+      if (ID_COL.test(col) && !/^(BIGINT|INTEGER|INT|SERIAL|BIGSERIAL)$/.test(type)) {
+        problems.push(`${name}: ${cur}.${col} kieu ${type} (phai la so) — se gay loi khi truyen username`);
+      }
+      if (TEXTY.test(col) && !/^(TEXT|VARCHAR)$/.test(type)) {
+        problems.push(`${name}: ${cur}.${col} kieu ${type} (phai la TEXT)`);
+      }
+    }
+  }
+  if (problems.length) console.log('ACTOR COLUMN TYPE PROBLEMS:\n' + problems.join('\n'));
+  ok(problems.length === 0, 'P0-1: moi cot dinh danh nguoi trong migration co kieu so (created_by/requester/decided_by...)');
+})();
+
+// 12.4 — P0-1: trong code, `created_by` phai nhan gia TRI SO (req.user.id),
+//     khong duoc truyen `req.user.username` (chen chuoi -> loi PG 500).
+(function createdByArgumentCheck() {
+  const bad = [];
+  for (const f of files) {
+    if (!/\.js$/.test(f)) continue;
+    const rel = String(f).replace(/\\/g, '/');
+    if (/db\/migrations\//.test(rel) || /db\/seeds\//.test(rel)) continue;
+    const src = read(f);
+    src.split('\n').forEach((line, i) => {
+      if (/created_by\s*[:=]\s*req\.user\.username/i.test(line)) {
+        bad.push(`${f}:${i + 1} created_by = req.user.username (phai la so) — ${line.trim().slice(0, 100)}`);
+      }
+      if (/created_by\s*[:=]\s*user\.username/i.test(line)) {
+        bad.push(`${f}:${i + 1} created_by = user.username (phai la so) — ${line.trim().slice(0, 100)}`);
+      }
+    });
+  }
+  if (bad.length) console.log('CREATED_BY TYPE VIOLATIONS:\n' + bad.join('\n'));
+  ok(bad.length === 0, 'P0-1: khong co cho gan created_by = username trong src/');
+})();
+
+// 12.5 — INV-5 / Phase 0.5: helper thoi gian VN phai dung, va khong con
+//     `new Date().toISOString().slice(0,10)` de lay ngay trong src/.
+(function vnTimeHelpersCheck() {
+  const dbSrc = read(path.join(ROOT, 'src/common/db.js'));
+  ok(/Asia\/Ho_Chi_Minh/.test(dbSrc), 'INV-5: helper thoi gian dung timezone Asia/Ho_Chi_Minh');
+  ok(/function toSqlDateTime/.test(dbSrc) && /function isExpired/.test(dbSrc), 'Phase 0.6: co toSqlDateTime() + isExpired() trong common/db.js');
+  const bad = [];
+  for (const f of files) {
+    if (!/\.js$/.test(f)) continue;
+    const rel = String(f).replace(/\\/g, '/');
+    if (/common\/db\.js$/.test(rel)) continue;
+    const src = read(f);
+    src.split('\n').forEach((line, i) => {
+      if (/new\s+Date\(\s*\)\s*\.toISOString\(\)\s*\.\s*slice\(\s*0\s*,\s*10\s*\)/.test(line)
+        && !/^\s*(\*|\/\/)/.test(line)
+        && !/lint trong verify/i.test(line)) {
+        bad.push(`${f}:${i + 1} dung toISOString().slice(0,10) de lay ngay — lech 1 ngay 00:00-07:00 VN`);
+      }
+    });
+  }
+  if (bad.length) console.log('VN DATE VIOLATIONS:\n' + bad.join('\n'));
+  ok(bad.length === 0, 'INV-5: khong con lay ngay bang new Date().toISOString().slice(0,10) trong src/');
+})();
+
+// 12.6 — Phase 0.4: migrate.js phai tach statement + gate theo version,
+//     va seed-storefront.cjs phai chay duoc tren ca 2 dialect.
+(function migrateAndSeedCheck() {
+  const migSrc = read(path.join(ROOT, 'src/db/migrate.js'));
+  ok(/function splitStatements/.test(migSrc), 'Phase 0.4: migrate.js tach SQL thanh statement');
+  ok(/SELECT version FROM schema_migrations/.test(migSrc), 'Phase 0.4: migrate.js DOC schema_migrations de skip file da apply');
+  ok(/duplicate column name/i.test(migSrc), 'Phase 0.4: migrate.js chi bo qua loi "duplicate column name"');
+  const seedSrc = read(path.join(ROOT, 'seed-storefront.cjs'));
+  const seedCode = seedSrc.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+  ok(/common\/db/.test(seedSrc), 'Phase 0.3: seed-storefront.cjs dung adapter common/db.js (2 dialect)');
+  ok(!/better-sqlite3/.test(seedCode), 'Phase 0.3: seed-storefront.cjs khong hard-code better-sqlite3');
+  ok(!/date\s*\(\s*'now'/i.test(seedCode), 'Phase 0.3: seed-storefront.cjs khong dung date(\'now\') (SQLite-only)');
+})();
+
+// 12.7 — Phase 0.1: test phai chay tren DB rieng, khong trong DB dev.
+(function testDbIsolationCheck() {
+  const setupSrc = read(path.join(ROOT, 'tests/setup.js'));
+  ok(/bizops-test\.db/.test(setupSrc), 'Phase 0.1: tests/setup.js dung DB test rieng (bizops-test.db)');
+  ok(/path\.resolve/.test(setupSrc), 'Phase 0.1: tests/setup.js resolve DATABASE_PATH tuyet doi');
+  ok(/migrate/.test(setupSrc), 'Phase 0.1: tests/setup.js tu chay migrate + seed');
+})();
+
+// ===========================================================================
+// 13. PHASE 3 — SCOPE V2 (P0-3/4/5 + P2-19)
+//     Scope phai enforce SERVER-SIDE, theo phong ban, FAIL-CLOSED, dong nhat
+//     cho MOI route. Verify phai doc source THAT — khong dung "|| true".
+// ===========================================================================
+
+// 13.1 — Migration 005 tao bang `resource_dept`; 006 backfill du lieu cu.
+(function deptScopeMigrationCheck() {
+  const mig5 = read(path.join(ROOT, 'src/db/migrations/005_dept_scope.sql'));
+  const mig5pg = read(path.join(ROOT, 'src/db/migrations/005_dept_scope.postgres.sql'));
+  const mig6 = read(path.join(ROOT, 'src/db/migrations/006_backfill_dept_scope.sql'));
+  const mig6pg = read(path.join(ROOT, 'src/db/migrations/006_backfill_dept_scope.postgres.sql'));
+  for (const [tag, src] of [['sqlite', mig5], ['postgres', mig5pg]]) {
+    ok(/CREATE TABLE IF NOT EXISTS resource_dept/i.test(src), 'Phase 3: migration 005 tao bang resource_dept (' + tag + ')');
+    ok(/PRIMARY KEY\s*\(\s*table_name\s*,\s*record_id\s*\)/i.test(src), 'Phase 3: resource_dept co PK (table_name, record_id) (' + tag + ')');
+    ok(/idx_resource_dept_dept/i.test(src), 'Phase 3: resource_dept co index theo dept (' + tag + ')');
+  }
+  ok(mig6.length > 0 && mig6pg.length > 0, 'Phase 3: co migration 006 backfill resource_dept (2 dialect)');
+  ok(/ON CONFLICT\s*\(\s*table_name\s*,\s*record_id\s*\)\s*DO NOTHING/i.test(mig6), 'Phase 3: backfill idempotent (ON CONFLICT DO NOTHING)');
+  // Backfill phai phu du cac bang nghiep vu chinh.
+  for (const t of ['customers', 'leads', 'orders', 'debts', 'payments', 'shipments', 'tickets', 'approvals', 'campaigns']) {
+    ok(new RegExp("'" + t + "'", 'i').test(mig6), 'Phase 3: backfill phu bang ' + t);
+  }
+
+  // 3 ban contract roles-permissions.json phai GIONG HET nhau (tranh drift).
+  const rpFiles = [
+    path.join(ROOT, 'docs', 'contract', 'roles-permissions.json'),
+    path.join(ROOT, '..', 'docs', 'contract', 'roles-permissions.json'),
+    path.join(ROOT, '..', 'agent_svc', 'docs', 'contract', 'roles-permissions.json'),
+  ];
+  const contents = rpFiles.filter((f) => fs.existsSync(f)).map((f) => read(f));
+  ok(contents.length === 3, 'Phase 3: co du 3 ban roles-permissions.json de so sanh');
+  ok(contents.every((c) => c === contents[0]), 'Phase 3: 3 ban roles-permissions.json GIONG HET nhau (khong drift)');
+  // §4.6: moi role phai co `scope_read`.
+  const roleScopes = roles.role_scopes || {};
+  const missingScopeRead = Object.keys(roleScopes).filter((r) => !roleScopes[r].scope_read);
+  ok(missingScopeRead.length === 0, 'Phase 3 (§4.6): moi role co scope_read' + (missingScopeRead.length ? ' (thieu: ' + missingScopeRead.join(', ') + ')' : ''));
+  const validScopeRead = ['all', 'dept', 'own', 'none'];
+  const badScopeRead = Object.keys(roleScopes).filter((r) => !validScopeRead.includes(roleScopes[r].scope_read));
+  ok(badScopeRead.length === 0, 'Phase 3 (§4.6): scope_read chi nhan gia tri hop le' + (badScopeRead.length ? ' (sai: ' + badScopeRead.join(', ') + ')' : ''));
+})();
+
+// 13.2 — scope.js: fail-closed + khong con entry `null` trong RESOURCE_DEPT.
+(function scopeModuleCheck() {
+  const scopeSrc = read(path.join(ROOT, 'src/common/scope.js'));
+  ok(/function resolveScope/.test(scopeSrc), 'Phase 3: scope.js co resolveScope');
+  ok(/function assertBusinessScope/.test(scopeSrc), 'Phase 3: scope.js co assertBusinessScope (doc resource_dept)');
+  ok(/function scopedList/.test(scopeSrc), 'Phase 3: scope.js co scopedList (JOIN resource_dept)');
+  ok(/function requireScoped/.test(scopeSrc), 'Phase 3: scope.js co middleware requireScoped');
+  ok(/function enforceDept/.test(scopeSrc), 'Phase 3: scope.js co enforceDept');
+  ok(/function canReadAllDepts/.test(scopeSrc), 'Phase 3 (§4.5): scope.js co canReadAllDepts (HR xem toan cong ty)');
+  // FAIL-CLOSED: `scopeFilter` phai lo row thieu dept.
+  ok(/d\s*==\s*null\s*\|\|\s*d\s*===\s*''\)\s*return\s+false/.test(scopeSrc), 'Phase 3: scopeFilter lo row khong co dept (fail-closed)');
+  // RESOURCE_DEPT khong duoc co entry null (chinh la loi P0-4).
+  const rdBlock = scopeSrc.match(/const RESOURCE_DEPT\s*=\s*\{([\s\S]*?)\n\};/);
+  ok(!!rdBlock, 'Phase 3: scope.js co RESOURCE_DEPT');
+  if (rdBlock) {
+    const nullEntries = rdBlock[1].split('\n').filter((l) => /:\s*null\s*,?\s*$/.test(l) && !/^\s*\/[/*]/.test(l));
+    ok(nullEntries.length === 0, 'Phase 3 (P0-4): RESOURCE_DEPT khong con entry null' + (nullEntries.length ? ' (' + nullEntries.join(' | ') + ')' : ''));
+  }
+  // DEPT_RULES phai phu du cac bang nghiep vu chinh.
+  for (const t of ['orders', 'customers', 'leads', 'quotes', 'contracts', 'shipments', 'tickets', 'debts', 'payments', 'campaigns']) {
+    ok(new RegExp('\\b' + t + '\\s*:').test(scopeSrc), 'Phase 3: DEPT_RULES co quy tac cho ' + t);
+  }
+})();
+
+// 13.3 — MOI route file nghiep vu phai dung `requireScoped` / `scopedList` /
+//       `assertBusinessScope` — KHONG con route doc TOAN BO du lieu.
+(function routeScopeEnforcementCheck() {
+  const ROUTE_FILES = ['sales.js', 'finance.js', 'supply.js', 'gov-min.js', 'helpdesk.js', 'marketing.js', 'overview.js', 'hr.js'];
+  for (const f of ROUTE_FILES) {
+    const p = path.join(ROOT, 'src', 'routes', f);
+    if (!fs.existsSync(p)) { ok(false, 'Phase 3: thieu route file ' + f); continue; }
+    const src = read(p);
+    ok(/requireScoped|canReadAllDepts/.test(src), 'Phase 3: routes/' + f + ' co dung scope middleware');
+    ok(!/requirePerm\('/.test(src) || /requireScoped/.test(src), 'Phase 3: routes/' + f + ' dung requireScoped (khong chi requirePerm)');
+  }
+  // Route doc TOAN BO du lieu nghiep vu (khong loc scope) = P0-5 regression.
+  // LUU Y: `budgets`/`sop_tasks` co cot `dept_code` that -> loc bang scopeFilter
+  // (fail-closed) nen khong xet o day.
+  const UNSCOPED = [
+    ['src/routes/sales.js', /all\(\s*'SELECT \* FROM (orders|customers|leads|quotes|contracts)/i],
+    ['src/routes/finance.js', /all\(\s*'SELECT \* FROM (debts|expenses|transactions)/i],
+    ['src/routes/supply.js', /all\(\s*'SELECT \* FROM (purchase_orders|shipments|suppliers|qa_checks)/i],
+    ['src/routes/helpdesk.js', /all\(\s*'SELECT \* FROM tickets/i],
+    ['src/routes/marketing.js', /all\(\s*'SELECT \* FROM campaigns/i],
+  ];
+  for (const [rel, re] of UNSCOPED) {
+    const src = read(path.join(ROOT, rel));
+    ok(!re.test(src), 'Phase 3 (P0-5): ' + rel + ' khong doc TOAN BO du lieu nghiep vu');
+  }
+  // IDOR: route theo ID phai co assertBusinessScope.
+  const IDOR_ROUTES = [
+    ['src/routes/sales.js', /router\.post\('\/orders\/:id\/(cancel|refund)'/, 'orders/:id'],
+    ['src/routes/sales.js', /router\.get\('\/customers\/:id'/, 'customers/:id'],
+    ['src/routes/supply.js', /router\.patch\('\/shipments\/:id'/, 'shipments/:id'],
+    ['src/routes/helpdesk.js', /router\.patch\('\/cskh\/tickets\/:id'/, 'cskh/tickets/:id'],
+  ];
+  for (const [rel, re, label] of IDOR_ROUTES) {
+    const src = read(path.join(ROOT, rel));
+    ok(re.test(src) && /assertBusinessScope/.test(src), 'Phase 3 (P0-4): ' + rel + ' ' + label + ' co assertBusinessScope');
+  }
+  // overview phai phan quyen theo vai.
+  const ovSrc = read(path.join(ROOT, 'src/modules/governance/overview.js'));
+  ok(/function getOverview\(conn, user\)/.test(ovSrc), 'Phase 3 (P0-5): getOverview(conn, user) nhan user');
+  ok(/canAccessDept/.test(ovSrc), 'Phase 3 (P0-5): overview guard tung khoi theo canAccessDept');
+  ok(/hidden:\s*true/.test(ovSrc), 'Phase 3 (P0-5): khoi ngoai scope bi an (hidden: true)');
+  const ovRoute = read(path.join(ROOT, 'src/routes/overview.js'));
+  ok(/X-Scope-Depts/.test(ovRoute), 'Phase 3 (P0-5): overview tra header X-Scope-Depts de audit');
+})();
+
+// 13.4 — Test Phase 3 phai ton tai (sec01d..sec01k).
+(function scopeTestCheck() {
+  const t = path.join(ROOT, 'tests', 'scope-v2.test.js');
+  ok(fs.existsSync(t), 'Phase 3 (§4.7): ton tai suite scope-v2.test.js');
+  if (fs.existsSync(t)) {
+    const src = read(t);
+    for (const id of ['sec01d', 'sec01e', 'sec01f', 'sec01g', 'sec01h', 'sec01i', 'sec01j', 'sec01k']) {
+      ok(new RegExp(id + ':').test(src), 'Phase 3 (§4.7): co test ' + id);
+    }
+  }
 })();
 
 console.log(fail === 0 ? '\nVERIFY: ALL PASS' : '\nVERIFY: ' + fail + ' FAIL');

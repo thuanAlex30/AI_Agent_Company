@@ -20,13 +20,70 @@ function isUniqueViolation(err) {
 let sqliteDb = null;
 let pgPool = null;
 
-function tzVN(d = new Date()) {
-  return new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+// ---------------------------------------------------------------------------
+// INV-5 / Phase 0.5: mot nguon thoi gian duy nhat theo Asia/Ho_Chi_Minh.
+//
+// BUG CU: tzVN() dung `new Date(d.toLocaleString('en-US', {timeZone:'Asia/Ho_Chi_Minh'}))`
+// -> bien doi thanh Date theo gio dia phuong (UTC+7) roi .toISOString() lai dua ve
+// UTC. Voi moc 00:30 VN ngay 2 (17:30Z ngay 1) -> ra "2026-01-01" => LECH 1 NGAY.
+// Voi moc 07:00 VN ngay 7 (00:00Z) -> "2026-11-06" => LECH 1 NGAY.
+//
+// FIX: dung Intl.DateTimeFormat voi timeZone de trich truc tiep cac thanh phan
+// Y/M/D/H/M/S theo gio VN, KHONG di qua Date/UTC cho phan "ngay".
+// ---------------------------------------------------------------------------
+function tzParts(d = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const g = (t) => parts.find((p) => p.type === t).value;
+  return { y: g('year'), m: g('month'), d: g('day'), hh: g('hour'), mm: g('minute'), ss: g('second') };
 }
-function nowVN() { return tzVN(new Date()); }
+
+/** Ngay nghiem vu theo gio VN: 'YYYY-MM-DD'. */
 function todayVN() {
-  const v = tzVN(new Date());
-  return v.toISOString().slice(0, 10);
+  const t = tzParts();
+  return `${t.y}-${t.m}-${t.d}`;
+}
+
+/** Date "moc" tai thoi diem hien tai theo gio VN (dung de so sanh/co so). */
+function nowVN() {
+  const t = tzParts();
+  return new Date(Number(t.y), Number(t.m) - 1, Number(t.d), Number(t.hh), Number(t.mm), Number(t.ss));
+}
+
+/** Ngay nghiem vu +/− N ngay, theo gio VN (khong qua UTC de tranh lech ngay). */
+function businessDayVN(offsetDays = 0) {
+  const t = tzParts();
+  const dt = new Date(Date.UTC(Number(t.y), Number(t.m) - 1, Number(t.d)) + offsetDays * 86400000);
+  return dt.toISOString().slice(0, 10);
+}
+function sinceVN(days = 30) { return businessDayVN(-Math.abs(days)); }
+
+/** Timestamp chuan cho DB: 'YYYY-MM-DD HH:mm:ss' (gio VN). */
+function nowISO() {
+  const t = tzParts();
+  return `${t.y}-${t.m}-${t.d} ${t.hh}:${t.mm}:${t.ss}`;
+}
+
+/** Chuoi timestamp chuan cho mot Date bat ky (mac dinh = hien tai), gio VN. */
+function toSqlDateTime(d = new Date()) {
+  const t = tzParts(d);
+  return `${t.y}-${t.m}-${t.d} ${t.hh}:${t.mm}:${t.ss}`;
+}
+
+/** Timestamp SQL tuyet doi (khong theo gio VN) — dung cho khoa/thoi han. */
+function toUtcDateTime(d = new Date()) {
+  return new Date(d).toISOString().slice(0, 19).replace('T', ' ');
+}
+function nowPlusMinutesISO(min = 15) {
+  return toUtcDateTime(new Date(Date.now() + min * 60000));
+}
+/** So sanh chuoi timestamp theo cung dinh dang (ISO-lexicographic). */
+function isExpired(value, now = nowISO()) {
+  return String(value || '').replace('T', ' ').slice(0, 19) < now;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,16 +130,6 @@ function getSqlite() {
 }
 // DB-01 + OPS-02 FIX v7: mot nguon thoi gian duy nhat — tinh o app (JS), truyen param vao SQL.
 // Khong dung datetime('now')/date('now')/strftime trong src (lint trong verify.js).
-function businessDayVN(offsetDays = 0) {
-  const v = tzVN(new Date());
-  v.setDate(v.getDate() + offsetDays);
-  return v.toISOString().slice(0, 10);
-}
-function sinceVN(days = 30) { return businessDayVN(-Math.abs(days)); }
-function nowPlusMinutesISO(min = 15) {
-  return new Date(Date.now() + min * 60000).toISOString().slice(0, 19).replace('T', ' ');
-}
-function nowISO() { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
 function getPool() {
   if (!pgPool) {
     pgPool = new Pool({
@@ -236,4 +283,10 @@ async function tx(fn) {
   }
 }
 
-module.exports = { query, get, all, run, tx, norm, nowVN, todayVN, businessDayVN, sinceVN, nowPlusMinutesISO, nowISO, DIALECT, isUniqueViolation };
+// Exports: dat o CUOI file de moi function deu da khai bao (INV-6: mot nguon).
+module.exports = {
+  query, get, all, run, tx, norm,
+  nowVN, todayVN, businessDayVN, sinceVN, nowPlusMinutesISO, nowISO,
+  toSqlDateTime, toUtcDateTime, isExpired,
+  DIALECT, isUniqueViolation,
+};

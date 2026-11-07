@@ -72,7 +72,7 @@ function publicKey(req) {
 }
 
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false,
+  windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
   keyGenerator: (req) => clientIp(req),
 });
 // ERP noi bo: 300 req / 15p / IP (nho).
@@ -95,7 +95,71 @@ const chatLimiter = rateLimit({
   keyGenerator: (req) => clientIp(req),
 });
 
+// --- Phase 2 (P1-14): rate-limit rieng cho refresh ---------------------------
+// Refresh la endpoint nhay cam: attacker co refresh token bi lo (hoac token
+// cu bi replay) se spam /api/auth/refresh de thu xoay vong lien tuc.
+// 10 req / 15 phút / IP.
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: (req) => clientIp(req),
+});
+
+// --- Phase 2 (P1-15): rate-limit theo USERNAME cho login ---------------------
+// Chi khoa theo IP thi attacker co nhieu IP (botnet/proxy) van brute-force
+// duoc 1 tai khoan. Khoa them theo username -> chan concentrated brute-force.
+const loginUserLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: (req) => {
+    const u = String((req.body && req.body.username) || '').trim().toLowerCase().slice(0, 64);
+    return 'u:' + (u || 'unknown');
+  },
+  skipSuccessfulRequests: true,
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 (P1-16): CSRF guard (double-submit cookie).
+//
+// Backend dung httpOnly cookie cho access/refresh token. SameSite=Lax chan
+// cross-site POST o tang trinh duyet, NHUNG khong phu la 100% (vd: subdomain
+// cung-site, trinh duyet cu, reverse proxy dung lai domain). => them double
+// -submit cookie: FE doc cookie `csrf_token` (KHONG httpOnly) va gui header
+// `X-CSRF-Token`; backend so sanh.
+//
+// EXEMPT (khong yeu cau CSRF):
+//   - GET/HEAD/OPTIONS (khong phai mutation)
+//   - /api/public/* (webhook, storefront, khong dung cookie session)
+//   - /api/auth/login, /api/auth/refresh (chua co session)
+//   - request co Authorization: Bearer (khong dung cookie)
+// ---------------------------------------------------------------------------
+const CSRF_SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const CSRF_EXEMPT_PATHS = [/^\/api\/public\//, /^\/api\/auth\/login$/, /^\/api\/auth\/refresh$/];
+
+function csrfGuard(req, res, next) {
+  if (CSRF_SAFE_METHODS.has(req.method)) return next();
+  const path = String(req.originalUrl || req.url || '').split('?')[0];
+  if (CSRF_EXEMPT_PATHS.some((re) => re.test(path))) return next();
+  // Bearer token => khong phai cookie session => CSRF khong ap dung.
+  if (/^Bearer\s+\S+/i.test(req.headers.authorization || '')) return next();
+
+  const cookieToken = (req.cookies && req.cookies.csrf_token) || '';
+  const headerToken = req.headers['x-csrf-token'] || '';
+  if (!cookieToken || !headerToken) {
+    return next(new (require('./errors').AppError)('FORBIDDEN', 'Thieu CSRF token', 403));
+  }
+  // So sanh thoi gian hang (timing-safe) de khong lo thong tin qua timing.
+  const a = Buffer.from(String(cookieToken));
+  const b = Buffer.from(String(headerToken));
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return next(new (require('./errors').AppError)('FORBIDDEN', 'CSRF token khong hop le', 403));
+  }
+  return next();
+}
+
+/** Sinh CSRF token ngau nhien (hex 32 bytes). */
+function newCsrfToken() { return crypto.randomBytes(32).toString('hex'); }
+
 module.exports = {
   applySecurity, loginLimiter, apiLimiter, publicLimiter, chatLimiter,
+  refreshLimiter, loginUserLimiter, csrfGuard, newCsrfToken,
   clientIp, clientSignature, publicKey, resolveTrustProxy,
 };

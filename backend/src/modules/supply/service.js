@@ -1,5 +1,6 @@
 const { AppError } = require('../../common/errors');
 const { writeAudit } = require('../../common/audit');
+const { setBusinessScope, resolveResourceDept } = require('../../common/scope');
 
 async function withTx(fn, conn) {
   const db = require('../../common/db');
@@ -25,7 +26,11 @@ async function readOnhand(c, sku) {
   return Number(row?.s || 0);
 }
 
-async function moveStock(conn, { sku, type, qty, ref_code = null, created_by = null, idempotency_key = null }) {
+// Phase 1 (P0-1): quy uoc moi cho signature:
+//   - `created_by` = ID NGUOI (SO) -> cot BIGINT
+//   - `actor`      = USERNAME (TEXT) -> audit_log.actor
+// Mac dinh created_by = null (nghiep vu tu dong: cron/webhook/storefront).
+async function moveStock(conn, { sku, type, qty, ref_code = null, created_by = null, actor = null, idempotency_key = null }) {
   return withTx(async (c) => {
     if (!sku || !type || !qty) throw new AppError('VALIDATION', 'moveStock can sku+type+qty', 400);
     if (!['in', 'out', 'adjust'].includes(type)) throw new AppError('VALIDATION', 'type kho khong hop le', 400);
@@ -48,12 +53,14 @@ async function moveStock(conn, { sku, type, qty, ref_code = null, created_by = n
       [sku, type, qty, ref_code, created_by, idempotency_key]
     );
     const id = r.lastInsertRowid || (await c.get('SELECT id FROM stock_moves WHERE product_sku=? ORDER BY id DESC LIMIT 1', [sku]))?.id;
-    await writeAudit(c, created_by || 'system', 'create', 'stock_moves', id, null, { sku, type, qty, ref_code });
+    // Phase 3: stock_moves thuoc phong ban supply.
+    await setBusinessScope(c, 'stock_moves', id, 'supply');
+    await writeAudit(c, actor || 'system', 'create', 'stock_moves', id, null, { sku, type, qty, ref_code });
     return { id };
   }, conn);
 }
 
-async function createShipment(conn, { order_id, carrier = null, created_by = null }) {
+async function createShipment(conn, { order_id, carrier = null, created_by = null, actor = null, dept = null }) {
   return withTx(async (c) => {
     const o = await c.get('SELECT * FROM orders WHERE id=?', [order_id]);
     if (!o) throw new AppError('NOT_FOUND', 'Khong tim thay don', 404);
@@ -61,7 +68,10 @@ async function createShipment(conn, { order_id, carrier = null, created_by = nul
     if (ex && ['pending', 'shipping'].includes(ex.status)) return { id: ex.id, deduped: true };
     const r = await c.run("INSERT INTO shipments(order_id,carrier,status,ship_fee,attempt) VALUES(?,?,'pending',0,1)", [order_id, carrier]);
     const id = r.lastInsertRowid || (await c.get('SELECT id FROM shipments WHERE order_id=? ORDER BY id DESC LIMIT 1', [order_id]))?.id;
-    await writeAudit(c, created_by || 'system', 'create', 'shipments', id, null, { order_id });
+    // Phase 3: shipment theo don (neu co) — fallback supply.
+    const shipDept = dept || await resolveResourceDept(c, 'shipments', { orderId: order_id });
+    await setBusinessScope(c, 'shipments', id, shipDept);
+    await writeAudit(c, actor || 'system', 'create', 'shipments', id, null, { order_id });
     return { id };
   }, conn);
 }
@@ -81,7 +91,7 @@ async function setShipment(conn, id, { status, tracking_code = null, carrier = n
   }, conn);
 }
 
-async function createPO(conn, { code, supplier_id = null, amount, need_date = null, created_by = null, idempotency_key = null }) {
+async function createPO(conn, { code, supplier_id = null, amount, need_date = null, created_by = null, actor = null, idempotency_key = null }) {
   return withTx(async (c) => {
     if (!code || !amount || amount <= 0) throw new AppError('VALIDATION', 'PO can code + amount>0', 400);
     if (idempotency_key) {
@@ -93,12 +103,14 @@ async function createPO(conn, { code, supplier_id = null, amount, need_date = nu
       [code, supplier_id, amount, need_date, created_by, idempotency_key]
     );
     const id = r.lastInsertRowid || (await c.get('SELECT id FROM purchase_orders WHERE code=?', [code]))?.id;
-    await writeAudit(c, created_by || 'system', 'create', 'purchase_orders', id, null, { code, amount });
+    // Phase 3: PO thuoc phong ban supply.
+    await setBusinessScope(c, 'purchase_orders', id, 'supply');
+    await writeAudit(c, actor || 'system', 'create', 'purchase_orders', id, null, { code, amount });
     return { id };
   }, conn);
 }
 
-async function receivePO(conn, id, { items = [], actor = null }) {
+async function receivePO(conn, id, { items = [], actor = null, actor_id = null }) {
   return withTx(async (c) => {
     const po = await c.get('SELECT * FROM purchase_orders WHERE id=?', [id]);
     if (!po) throw new AppError('NOT_FOUND', 'Khong tim thay PO', 404);
@@ -107,13 +119,13 @@ async function receivePO(conn, id, { items = [], actor = null }) {
       if (!appr) throw new AppError('APPROVAL_REQUIRED', 'PO chua duyet (can approval approved)', 403);
     }
     for (const it of (items || [])) {
-      await moveStock(c, { sku: it.sku, type: 'in', qty: Math.abs(it.qty), ref_code: po.code, created_by: actor });
+      await moveStock(c, { sku: it.sku, type: 'in', qty: Math.abs(it.qty), ref_code: po.code, created_by: actor_id, actor });
     }
     await c.run("UPDATE purchase_orders SET status='received' WHERE id=?", [id]);
     await writeAudit(c, actor || 'system', 'update', 'purchase_orders', id, { status: po.status }, { status: 'received' });
     // payable qua module finance (giu bien ownership)
     const financeService = require('../finance/service');
-    await financeService.createPayable(c, { order_id: null, amount: Number(po.amount), created_by: actor, note: `Payable ${po.code}` });
+    await financeService.createPayable(c, { order_id: null, amount: Number(po.amount), created_by: actor_id, actor, note: `Payable ${po.code}` });
     return { id, status: 'received' };
   }, conn);
 }
