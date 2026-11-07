@@ -1,22 +1,46 @@
 openapi: 3.0.3
-info: {title: BizOps AI v8, version: 8.0.0}
+info: {title: BizOps AI v8.1, version: 11.1.0, description: "Contract API — nguon su that cho FE/agent. Phase 3: scope v2 server-side; Phase 4: state machine + tx + audit; Phase 5: refresh queue + CSRF; Phase 6: container hardening + observability."}
 servers: [{url: http://localhost:3000}]
+
+# ---------------------------------------------------------------------------
+# SECURITY (Phase 2 + 5)
+#   - Cookie session: `access_token` (httpOnly, 30p) + `refresh_token` (httpOnly, 7d)
+#   - Moi MUTATION (POST/PUT/PATCH/DELETE) can header `X-CSRF-Token` khop cookie
+#     `csrf_token` (double-submit, KHONG httpOnly). Exception: /api/public/*,
+#     /api/auth/login, /api/auth/refresh, va request kem `Authorization: Bearer`.
+#   - Pham vi du lieu theo phong ban: server-side, fail-closed. Response co
+#     header `X-Scope-Depts` (ALL hoac danh sach ma phong ban).
+#   - `X-Request-Id` tra ve cho moi request (dung de truy vet log).
+# ---------------------------------------------------------------------------
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+
+tags:
+  - {name: auth, description: "Dang nhap / refresh / quan ly phien"}
+  - {name: scope, description: "Khoi tong hop theo phong ban"}
+  - {name: finance, description: "Cong no, thanh toan, ke toan"}
+
 paths:
-  /api/health: {get: {responses: {'200': {description: ok}}}}
-  /api/auth/login: {post: {responses: {'200': {description: jwt}}}}
-  /api/auth/refresh: {post: {responses: {'200': {description: rotate}}}}
-  /api/auth/logout: {post: {responses: {'200': {description: revoke}}}}
-  /api/auth/me: {get: {description: current user + permissions}}
+  /api/health: {get: {tags: [auth], summary: "Liveness + version (config.APP_VERSION)", responses: {'200': {description: ok}}}}
+  /api/ready: {get: {tags: [auth], summary: "Readiness — DB (bat buoc) + agent (checks.agent, degraded neu agent offline)", responses: {'200': {description: ready}, '503': {description: not_ready}}}}
+  /api/auth/login: {post: {tags: [auth], summary: "Dang nhap — tra access + refresh + csrf_token; set cookie httpOnly", responses: {'200': {description: jwt + csrf_token}, '401': {description: AUTH}}}}
+  /api/auth/refresh: {post: {tags: [auth], summary: "Xoay vong refresh token (atomic). Token cu bi thu hoi => 401 + thu hoi TOAN BO phien (reuse detection)", responses: {'200': {description: rotate + csrf_token moi}, '401': {description: AUTH (het han / reuse)}}}}
+  /api/auth/logout: {post: {tags: [auth], summary: "Thu hoi phien hien tai", responses: {'200': {description: revoked}}}}
+  /api/auth/logout-all: {post: {tags: [auth], summary: "Thu hoi TOAN BO phien cua user (dung khi doi mat khau)", responses: {'200': {description: revoked_all}}}}
+  /api/auth/sessions: {get: {tags: [auth], summary: "Danh sach phien dang mo (CHI cua chinh user)", responses: {'200': {description: sessions}}}}
+  /api/auth/sessions/{id}: {delete: {tags: [auth], summary: "Thu hoi 1 phien", responses: {'200': {description: revoked}, '404': {description: NOT_FOUND}}}}
+  /api/auth/me: {get: {tags: [auth, scope], summary: "User hien tai + permissions + scope (dept_code, depts, all_depts)", responses: {'200': {description: user + permissions + scope}}}}
   /api/customers: {get: {}, post: {}}
   /api/customers/{id}: {get: {}, patch: {}}
   /api/leads: {get: {}, post: {}}
   /api/leads/{id}/convert: {post: {}}
   /api/quotes: {get: {}, post: {}}
   /api/contracts: {get: {}, post: {}}
-  /api/contracts/{id}/submit-approval: {post: {}}
+  /api/contracts/{id}/submit-approval: {post: {summary: "Cap duyet tinh tu approval-matrix.json; co cap bo sung legal neu contract_extra_legal khop"}}
   /api/orders: {get: {}, post: {parameters: [Idempotency-Key]}}
-  /api/orders/{id}/cancel: {post: {}}
-  /api/orders/{id}/refund: {post: {}}
+  /api/orders/{id}/cancel: {post: {summary: "Chi cancel khi chuyen trang thai hop le (ORDER_FLOW) va CHUA co payment"}}
+  /api/orders/{id}/refund: {post: {summary: "Chi refund tu paid/partial (ORDER_FLOW)"}}
   /api/sales/kpi: {get: {}}
   /api/campaigns: {get: {}, post: {}}
   /api/marketing/roi: {get: {}}
@@ -29,17 +53,18 @@ paths:
   /api/suppliers: {get: {}, post: {}}
   /api/shipments: {get: {}, post: {}}
   /api/shipments/{id}: {patch: {}}
-  /api/qa-checks: {get: {}, post: {}}
+  /api/qa-checks: {get: {}, post: {summary: "Validate ref_id ton tai theo ref_type (order/shipment/product)"}}
   /api/sop-tasks: {get: {}, post: {}}
   /api/transactions: {get: {}, post: {}}
-  /api/transactions/import-csv: {post: {}}
+  /api/transactions/import-csv: {post: {summary: "Dem imported/skipped theo changes; phan biet duplicate vs invalid (P2-20)"}}
   /api/reconcile/run: {post: {}}
   /api/debts: {get: {}, post: {}}
   /api/debts/{id}/remind: {post: {}}
   /api/debts/remind-all: {post: {description: US-FIN-02 1 click}}
-  /api/payments: {post: {parameters: [Idempotency-Key]}}
-  /api/expenses: {get: {}, post: {}}
+  /api/payments: {post: {parameters: [Idempotency-Key], summary: "Khoa dong cong no truoc khi ghi (anti lost-update)"}}
+  /api/expenses: {get: {}, post: {summary: "Cap duyet tinh tu approval-matrix.json (khong hardcode nguong)"}}
   /api/finance/kpis: {get: {}}
+  /api/finance/cashflow: {get: {tags: [finance], summary: "Cashflow theo ngay (SQL portable 2 dialect)", responses: {'200': {description: rows}}}}
   /api/reminders: {get: {}}
   /api/budgets: {get: {}, post: {}}
   /api/employees: {get: {}, post: {}}
@@ -55,14 +80,14 @@ paths:
   /api/cskh/sla: {get: {}}
   /api/cskh/csat: {get: {}}
   /api/ratings: {post: {}}
-  /api/departments/overview: {get: {}}
-  /api/agent/brief: {get: {}}
-  /api/approvals: {get: {}, post: {}}
-  /api/approvals/{id}/decide: {post: {}}
-  /api/audit: {get: {}}
+  /api/departments/overview: {get: {tags: [scope], summary: "KPI tong hop theo vai + phong ban; tra header X-Scope-Depts", responses: {'200': {description: overview}}}}
+  /api/agent/brief: {get: {tags: [scope], summary: "Brief dang markdown cho AI agent; tra header X-Scope-Depts", responses: {'200': {description: markdown}}}}
+  /api/approvals: {get: {}, post: {summary: "Cap duyet LUON tinh tu matrix; client KHONG duoc ep cap (400)"}}
+  /api/approvals/{id}/decide: {post: {summary: "Khoa dong + conditional update chong double-decide"}}
+  /api/audit: {get: {summary: "Chi tra audit cua ban ghi TRONG phong ban minh"}}
   /api/risks: {get: {}, post: {}}
   /api/it-incidents: {get: {}, post: {}}
-  /api/it-incidents/{id}: {patch: {}}
+  /api/it-incidents/{id}: {patch: {summary: "Chuyen trang thai theo IT_FLOW; sai => 400"}}
   /api/it/health: {get: {}}
   /api/product-features: {get: {}, post: {}}
   /api/users: {get: {}, post: {}}
@@ -73,8 +98,26 @@ paths:
   /api/public/services/{id}: {get: {description: US-STOREFRONT-01 chi tiet dich vu}}
   /api/public/banners: {get: {description: US-STOREFRONT-01 hero carousel}}
   /api/public/promotions: {get: {description: US-STOREFRONT-01 khuyen mai active}}
-  /api/public/orders: {post: {description: US-STOREFRONT-02 checkout (gia server + combo explode + idempotency), parameters: [Idempotency-Key]}}
+  /api/public/orders: {post: {description: US-STOREFRONT-02 checkout (gia server + combo explode + idempotency + dat truoc ton kho atomic), parameters: [Idempotency-Key]}}
   /api/public/service-requests: {post: {description: US-STOREFRONT-02 dat lich teabreak chi tiet (slot/party/location/MST)}}
   /api/public/orders/{code}: {get: {description: US-STOREFRONT-03 tra cuu 2 yeu to (ma + SDT/email hoac X-Lookup-Token), parameters: [contact, X-Lookup-Token]}}
   /api/public/payments/webhook: {post: {description: US-STOREFRONT-03 webhook VietQR tinh (HMAC + replay + idempotency), parameters: [x-signature, x-timestamp]}}
   /api/public/chat: {post: {description: US-STOREFRONT-04 chat public proxy sang agent_svc /public-chat}}
+
+components:
+  securitySchemes:
+    cookieAuth: {type: apiKey, in: cookie, name: access_token}
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    Idempotency-Key: {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: "Khoa chong ghi trung; GIU NGUYEN qua vong retry (FE)"}
+    X-CSRF-Token: {name: X-CSRF-Token, in: header, required: false, schema: {type: string}, description: "Khop voi cookie csrf_token (double-submit). Bat buoc cho moi mutation dung cookie session."}
+    X-Scope-Depts: {name: X-Scope-Depts, in: header, required: false, schema: {type: string}, description: "RESPONSE: pham vi du lieu server-side quyet dinh (ALL hoac danh sach ma phong ban)"}
+    X-Request-Id: {name: X-Request-Id, in: header, required: false, schema: {type: string}, description: "RESPONSE: id truy vet log ([rid=...])"}
+    X-Lookup-Token: {name: X-Lookup-Token, in: header, required: false, schema: {type: string}, description: "Token tra cuu don (thay the SDT/email)"}
+    contact: {name: contact, in: query, required: false, schema: {type: string}, description: "SDT hoac email de tra cuu don"}
+    x-signature: {name: x-signature, in: header, required: false, schema: {type: string}}
+    x-timestamp: {name: x-timestamp, in: header, required: false, schema: {type: string}}
+  responses:
+    Forbidden: {description: "FORBIDDEN — ngoai scope phong ban / thieu quyen / CSRF token khong hop le"}
+    Conflict: {description: "CONFLICT — bi cap nhat boi giao dich khac (conditional update that bai)"}
+    NotFound: {description: "NOT_FOUND"}

@@ -1172,5 +1172,82 @@ function mutationRoutes(src) {
   }
 })();
 
+// ===========================================================================
+// 18. PHASE 7 — TÀI LIỆU & TRACEABILITY
+// ===========================================================================
+
+// 18.1 — ADR cho các quyết định lớn phải tồn tại.
+(function adrCheck() {
+  const adrDir = path.join(ROOT, '..', 'docs', 'adr');
+  ok(fs.existsSync(adrDir), 'Phase 7: ton tai docs/adr');
+  for (const n of ['0012-refresh-token-rotation.md', '0013-resource-dept.md', '0014-scope-v2.md', '0015-state-machine-tx-audit.md']) {
+    ok(fs.existsSync(path.join(adrDir, n)), 'Phase 7: ton tai ADR ' + n);
+  }
+  // ADR phai noi dung quyet dinh (khong phai placeholder).
+  for (const n of ['0012-refresh-token-rotation.md', '0014-scope-v2.md']) {
+    const src = read(path.join(adrDir, n));
+    ok(/##\s*Quyết định/.test(src) || /##\s*Quyet dinh/.test(src), 'Phase 7: ADR ' + n + ' co muc "Quyet dinh"');
+    ok(src.length > 800, 'Phase 7: ADR ' + n + ' co noi dung du');
+  }
+})();
+
+// 18.2 — openapi.yaml phai mo ta endpoint moi + header moi.
+(function openapiContractCheck() {
+  const oa = read(path.join(ROOT, 'docs/contract/openapi.yaml'));
+  for (const p of ['/api/auth/sessions', '/api/auth/logout-all', '/api/auth/refresh', '/api/finance/cashflow']) {
+    ok(oa.includes(p), 'Phase 7: openapi co endpoint ' + p);
+  }
+  for (const h of ['X-CSRF-Token', 'X-Scope-Depts', 'X-Request-Id']) {
+    ok(oa.includes(h), 'Phase 7: openapi mo ta header ' + h);
+  }
+  ok(/csrfAuth|cookieAuth/.test(oa), 'Phase 7: openapi khai bao securitySchemes');
+  ok(/Idempotency-Key/.test(oa), 'Phase 7: openapi mo ta Idempotency-Key');
+})();
+
+// 18.3 — README + docs security/operations phai cap nhat cho v8.1.
+(function docsUpdatedCheck() {
+  const readme = read(path.join(ROOT, '..', 'README.md'));
+  ok(/v11\.1|11\.1/.test(readme), 'Phase 7: README cap nhat len v11.1');
+  ok(/refresh/i.test(readme) && /CSRF/i.test(readme), 'Phase 7: README mo ta refresh + CSRF');
+  ok(/resource_dept/.test(readme), 'Phase 7: README mo ta scope theo phong ban');
+  ok(/Quy trình release/.test(readme), 'Phase 7: README co quy trinh release');
+  ok(/TRUST_PROXY/.test(readme) && /MAX_SESSIONS_PER_USER/.test(readme), 'Phase 7: README co bien moi truong van hanh');
+  const sec = read(path.join(ROOT, '..', 'docs', '08-security.md'));
+  ok(/reuse/i.test(sec) && /CSRF/i.test(sec), 'Phase 7: 08-security.md mo ta reuse + CSRF');
+  ok(/X-CSRF-Token/.test(sec), 'Phase 7: 08-security.md mo ta X-CSRF-Token');
+  const ops = read(path.join(ROOT, '..', 'docs', '10-operations.md'));
+  ok(/read_only/.test(ops) && /checks\.agent/.test(ops), 'Phase 7: 10-operations.md mo ta hardening + readiness');
+})();
+
+// 18.4 — state-machines.md phai kiem tra duoc (bang transition) cho moi entity.
+(function stateMachinesDocCheck() {
+  const sm = read(path.join(ROOT, 'docs/contract/state-machines.md'));
+  for (const e of ['orders', 'debts', 'shipments', 'purchase_orders', 'contracts', 'leads', 'tickets', 'it_incidents', 'approvals']) {
+    ok(new RegExp(e).test(sm), 'Phase 7: state-machines.md mo ta ' + e);
+  }
+  ok(/ORDER_FLOW/.test(sm) && /IT_FLOW/.test(sm), 'Phase 7: state-machines.md tro toi bang transition trong code');
+})();
+
+// 18.5 — Audit report phai co phan "delta v8.1".
+(function auditReportDeltaCheck() {
+  const rpt = read(path.join(ROOT, '..', 'newpromt', 'AI_Agent_Company_v8_Audit_Stabilization_Report.md'));
+  ok(/DELTA v8\.1/i.test(rpt), 'Phase 7: audit report co phan "DELTA v8.1"');
+  for (const id of ['P0-1', 'P1-6', 'P1-13', 'P2-20', 'P2-21']) {
+    ok(rpt.includes(id), 'Phase 7: audit report liet ke ' + id);
+  }
+})();
+
+// 18.6 — traceability phai phu moi bang + moi file test trong backend.
+(function traceabilityCoverageCheck() {
+  const csv = read(path.join(ROOT, 'docs/contract/traceability.csv'));
+  for (const id of ['SEC-05', 'SEC-06', 'BUS-01', 'BUS-03', 'PG-01', 'OPS-01', 'QA-06']) {
+    ok(csv.includes(id + ','), 'Phase 7: traceability.csv co dong ' + id);
+  }
+  const testFiles = fs.readdirSync(path.join(ROOT, 'tests')).filter((f) => f.endsWith('.test.js'));
+  for (const f of testFiles) {
+    ok(csv.includes(f), 'Phase 7: traceability.csv tro toi ' + f);
+  }
+})();
+
 console.log(fail === 0 ? '\nVERIFY: ALL PASS (' + assertCount + ' asserts)' : '\nVERIFY: ' + fail + ' FAIL (' + assertCount + ' asserts)');
 process.exit(fail === 0 ? 0 : 1);

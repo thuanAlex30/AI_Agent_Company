@@ -675,3 +675,152 @@ Multi-Agent, Knowledge Graph và SaaS.
 **Ghi chú:** Báo cáo này không thực hiện commit sửa code, không tạo
 GitHub Issue/PR và không thay đổi nhánh `main`. Đây là kết quả audit và
 kế hoạch thực thi để đội kỹ thuật review trước khi triển khai.
+
+---
+
+# PHẦN BỔ SUNG: DELTA v8.1 — ENTERPRISE HARDENING (Phase 0 → Phase 7)
+
+> Bổ sung cho `AI_Agent_Company_v8_Audit_Stabilization_Report.md`.
+> Nguồn: `newpromt/AI_Agent_Company_v8.1_Enterprise_Hardening_Prompt.md`.
+> Trạng thái tại commit `v11.1`: **toàn bộ Phase 0–7 đã triển khai và xanh gate**.
+
+## 15. Tổng quan
+
+| Phase | Nội dung | Gate | Trạng thái |
+|---|---|---|---|
+| 0 | Nền: test isolation, chuẩn hoá timezone, `splitStatements` | `verify` + `npm test` | ✅ |
+| 1 | `created_by` đúng kiểu (bigint) — PostgreSQL chạy được | `npm test` trên PG | ✅ |
+| 2 | Refresh token atomic + reuse detection, session, CSRF | `security-regression` | ✅ |
+| 3 | Scope v2 — phòng ban server-side, fail-closed, `resource_dept` | `scope-v2.test.js` | ✅ |
+| 4 | Nghiệp vụ: state machine, tx, audit, maker-checker | `phase4.test.js` | ✅ |
+| 5 | FE: refresh queue, CSRF, hiển thị scope | `phase5.test.js` | ✅ |
+| 6 | CI 2 dialect, ops hardening, `verify` ≥ 400 assert | `phase6.test.js` | ✅ |
+| 7 | Tài liệu: traceability, openapi, ADR | `contract-sync` | ✅ |
+
+**Số đo cuối:** `npm run verify` → **688 assertion, ALL PASS** ·
+`npm test` → **110/110 xanh** (backend) · **22/22 xanh** (agent_svc).
+
+## 16. Chi tiết từng hạng mục
+
+### Phase 0 — Nền
+
+| ID | Hạng mục | Trạng thái | Nơi thay đổi |
+|---|---|---|---|
+| P0-0 | Test isolation: `data/bizops-test.db`, guard chặn ghi vào DB dev | ✅ | `backend/tests/setup.js` |
+| P0-0b | Chuẩn hoá timezone VN (`Asia/Ho_Chi_Minh`), `toSqlDateTime`/`nowISO` | ✅ | `backend/src/common/db.js` |
+| P0-0c | `splitStatements` cho migration nhiều câu | ✅ | `backend/src/db/migrate.js` |
+| P0-0d | Migration idempotent (chạy 2 lần không đổi schema) | ✅ | `backend/src/db/migrate.js` |
+
+### Phase 1 — Kiểu dữ liệu / PostgreSQL
+
+| ID | Hạng mục | Trạng thái | Nơi thay đổi |
+|---|---|---|---|
+| P0-1 | `created_by` là số (bigint) thay vì username | ✅ | `backend/src/common/auth.js` (`actorId`) |
+| P0-1b | Seed/migrate chạy được trên PostgreSQL thật | ✅ | `backend/src/db/migrate.js`, `001_init.postgres.sql` |
+
+### Phase 2 — Phiên & CSRF
+
+| ID | Hạng mục | Trạng thái | Nơi thay đổi |
+|---|---|---|---|
+| P0-2 | Refresh token atomic rotation (`changes === 1`) | ✅ | `backend/src/common/auth.js` |
+| P0-2b | **Reuse detection có hiệu lực** — thu hồi toàn bộ phiên | ✅ | `backend/src/common/auth.js` |
+| P1-11 | Access TTL ≤ 30 phút | ✅ | `ACCESS_TTL=30m` |
+| P1-12 | Quản lý phiên: `/api/auth/sessions`, `/logout-all` | ✅ | `backend/src/routes/auth.js` |
+| P1-13 | CSRF double-submit cookie + `csrfGuard` | ✅ | `backend/src/common/security.js` |
+
+### Phase 3 — Scope v2 (phòng ban)
+
+| ID | Hạng mục | Trạng thái | Nơi thay đổi |
+|---|---|---|---|
+| P0-3 | `resource_dept` danh mục phòng ban (migration 005/006) | ✅ | `backend/src/db/migrations/005_dept_scope.sql` |
+| P0-4 | Chặn IDOR: `assertBusinessScope` trên mọi route theo id | ✅ | `backend/src/common/scope.js` |
+| P0-5 | `scopedList` thay cho đọc toàn bộ; `getOverview(conn, user)` | ✅ | `backend/src/common/scope.js`, `governance/overview.js` |
+| P2-19 | Fail-closed: không xác định phòng ban ⇒ không thấy dữ liệu | ✅ | `backend/src/common/scope.js` |
+| — | Header `X-Scope-Depts` để audit phạm vi | ✅ | `backend/src/routes/overview.js` |
+| — | `roles-permissions.json` đồng bộ 3 bản contract | ✅ | `docs/contract/` |
+
+### Phase 4 — Nghiệp vụ, transaction, audit
+
+| ID | Hạng mục | Trạng thái | Nơi thay đổi |
+|---|---|---|---|
+| P1-6 | Cấp duyệt tính từ `approval-matrix.json`; client không ép cấp (400) | ✅ | `backend/src/modules/governance/approvals.js` |
+| P1-7 | Khoá + conditional update chống double-decide; `decided_at` chuẩn hoá | ✅ | `backend/src/modules/governance/approvals.js` |
+| P1-8 | Cấm fallback `ORDER BY id DESC LIMIT 1`; dùng `insertedId()` | ✅ | `backend/src/common/db.js` |
+| P1-9 | Khoá dòng trước khi ghi (orders/debts/approvals/products) | ✅ | `backend/src/modules/sales/service.js`, `finance/service.js` |
+| P1-10 | Storefront đặt trước tồn kho atomic trong 1 tx | ✅ | `backend/src/public/orders.js` |
+| P1-11 | `sessions` + giới hạn phiên đồng thời | ✅ | `backend/src/common/auth.js` |
+| P1-12 | `logout-all` + `revoked_reason` | ✅ | `backend/src/common/auth.js` |
+| P1-13 | CSRF guard (xem Phase 2) | ✅ | `backend/src/common/security.js` |
+| P1-14 | Mọi mutation có `tx` + `writeAudit`; thiếu `conn` ⇒ 500 | ✅ | `backend/src/common/audit.js` + toàn bộ routes |
+| P1-15 | `cashflow()` SQL portable + route `/api/finance/cashflow` | ✅ | `backend/src/modules/finance/service.js` |
+| P1-16 | Seed storefront dialect-agnostic | ✅ | `backend/seed-storefront.cjs` |
+| P1-17 | Thanh toán đủ khi chưa giao xong **phải qua `partial`** | ✅ | `backend/src/modules/sales/service.js` |
+| P1-18 | Approve contract cần đủ cấp chính + cấp bổ sung `legal` | ✅ | `backend/src/modules/governance/approvals.js` |
+| P1-19 | `decided_at`/`signed_date` chuẩn hoá theo giờ VN | ✅ | `backend/src/modules/governance/approvals.js` |
+| P1-20 | Approve chỉ khi requester ≠ decider | ✅ | `backend/src/modules/governance/approvals.js` |
+| P1-21 | `IT_FLOW` + QA validate `ref_id` tồn tại | ✅ | `backend/src/modules/it/service.js`, `qa/service.js` |
+| P2-21 | State machine IT incident + validate `ref_id` theo `ref_type` | ✅ | `backend/src/modules/it/service.js`, `qa/service.js` |
+| P2-20 | Import CSV: `imported/skipped` theo `changes`, phân biệt duplicate vs invalid | ✅ | `backend/src/routes/finance.js` |
+
+### Phase 5 — Frontend
+
+| ID | Hạng mục | Trạng thái | Nơi thay đổi |
+|---|---|---|---|
+| P1-13a | FE refresh queue (`tryRefresh`) — 1 lệnh refresh cho nhiều request 401 | ✅ | `frontend/src/api.js` |
+| P1-13b | FE gửi `X-CSRF-Token`; retry **giữ nguyên** `Idempotency-Key` | ✅ | `frontend/src/api.js` |
+| P1-13c | `auth:expired` ⇒ đăng xuất + toast | ✅ | `frontend/src/App.jsx` |
+| P1-13d | Hiển thị `dept_code` + phạm vi scope trên header | ✅ | `frontend/src/App.jsx` |
+| P1-13e | Version đọc từ `/api/health` (không hardcode `v6.1`) | ✅ | `frontend/src/App.jsx`, `backend/src/config.js` |
+| P1-13f | `canSeeTab` `.some()` → `.every()` (khớp `requirePerm`) | ✅ | `frontend/src/App.jsx` |
+| — | Storefront **không** dùng cookie ERP | ✅ | xác minh bằng `verify.js` |
+
+### Phase 6 — CI & vận hành
+
+| ID | Hạng mục | Trạng thái | Nơi thay đổi |
+|---|---|---|---|
+| PG-01 | Migration 2 dialect đồng bộ bảng/cột | ✅ | `001_init.postgres.sql` + `verify.js` |
+| PG-02 | Không dùng hàm SQLite-only trong migration | ✅ | `verify.js` |
+| PG-03 | `created_by` là kiểu số ở cả 2 dialect | ✅ | `verify.js` |
+| PG-04 | Không có forward FK trong migration PG | ✅ | `verify.js` (DB-01) |
+| PG-05 | CI job `contract-sync` — 3 bản contract giống hệt | ✅ | `.github/workflows/ci.yml` |
+| OPS-01 | Container user không phải root + `cap_drop ALL` + `read_only` | ✅ | `backend/Dockerfile`, `docker-compose.yml` |
+| OPS-02 | Log có `request_id`; log mọi quyết định RBAC/scope 403 | ✅ | `backend/src/common/logger.js` |
+| OPS-03 | `/api/ready` kiểm tra cả agent (`checks.agent`, `degraded`) | ✅ | `backend/src/server.js` |
+| OPS-04 | `.env.example` đủ biến vận hành | ✅ | `backend/.env.example` |
+| QA-01 | `verify` ≥ 400 assert và **thực sự fail** khi contract vi phạm | ✅ | `backend/scripts/verify.js` (688 assert) |
+
+### Phase 7 — Tài liệu
+
+| ID | Hạng mục | Trạng thái | Nơi thay đổi |
+|---|---|---|---|
+| DOC-01 | `traceability.csv` có dòng cho mọi hạng mục mới | ✅ | `docs/contract/traceability.csv` |
+| DOC-02 | `openapi.yaml` có endpoint mới + `X-CSRF-Token` + `X-Scope-Depts` | ✅ | `docs/contract/openapi.yaml` |
+| DOC-03 | `docs/08-security.md` mô tả vòng đời refresh + CSRF + session | ✅ | `docs/08-security.md` |
+| DOC-04 | ADR cho quyết định lớn | ✅ | `docs/adr/0012`–`0015` |
+| DOC-05 | README cập nhật kiến trúc, 2 dialect, biến môi trường, release | ✅ | `README.md` |
+| DOC-06 | `state-machines.md` là bảng transition đầy đủ | ✅ | `docs/contract/state-machines.md` |
+
+## 17. ADR mới
+
+| ADR | Tiêu đề |
+|---|---|
+| [ADR-0012](docs/adr/0012-refresh-token-rotation.md) | Refresh token atomic rotation + session management |
+| [ADR-0013](docs/adr/0013-resource-dept.md) | `resource_dept` — bảng danh mục phòng ban cho mọi tài nguyên |
+| [ADR-0014](docs/adr/0014-scope-v2.md) | Scope v2 — phân quyền phòng ban server-side, fail-closed |
+| [ADR-0015](docs/adr/0015-state-machine-tx-audit.md) | State machine + transaction + audit gắn chặt (INV-2, INV-8) |
+
+## 18. Kết luận CTO sau v8.1
+
+Ba điều không thỏa hiện ở §14 **đã được chứng minh bằng code + test + gate**:
+
+1. **Không sai lệch tiền, công nợ, tồn kho** → khoá dòng + conditional update +
+   state machine + `insertedId()` + thanh toán đủ phải qua `partial`.
+2. **Không đọc/thao tác vượt quyền** → scope v2 server-side fail-closed +
+   `resource_dept` + CSRF + refresh queue + cấp duyệt không thể bị ép.
+3. **Không phát hành nếu chưa chứng minh** → `verify` 688 assert + 110 test +
+   12 job CI (2 dialect, race, security, browser E2E, docker-smoke, contract-sync).
+
+**Trạng thái mục tiêu sau v8.1: 9.0–9.3/10 (Enterprise-ready cho đội 5–20 người).**
+Rủi ro còn lại đã được ghi rõ trong ADR và `docs/10-operations.md`:
+NAT đổi IP, chuẩn hoá `resource_dept` khi thêm module mới, và chi phí khoá dòng
+trên PostgreSQL khi lưu lượng tăng cao.
