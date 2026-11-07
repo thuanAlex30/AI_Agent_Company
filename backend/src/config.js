@@ -20,6 +20,8 @@ const cfg = {
   JWT_SECRET: secret('JWT_SECRET'),
   WEBHOOK_SECRET: secret('WEBHOOK_SECRET'),
   isProd: prod,
+  // Phase 5: 1 nguon version (FE doc tu /api/health thay vi hardcode 'v6.1').
+  APP_VERSION: process.env.APP_VERSION || '11.1.0',
 };
 // 2 key doc lap, khong fallback (prod)
 if (prod && cfg.AGENT_INTERNAL_KEY === cfg.AGENT_PUBLIC_KEY) {

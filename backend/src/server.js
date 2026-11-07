@@ -40,7 +40,9 @@ app.use('/api/', csrfGuard);
 // Readiness (/api/ready): process + DB (va dependency) san sang -> 503 neu DB loi.
 // Healthcheck cu compose phai dung /api/ready de orchestrator khong coi
 // service "san sang" khi DB chua san sang.
-app.get('/api/health', (req, res) => ok(res, { status: 'up', service: 'backend', version: '8.0.0', time: new Date().toISOString() }));
+// Phase 5: version lay tu config.APP_VERSION (1 nguon) — FE doc /api/health.
+const { APP_VERSION } = require('./config');
+app.get('/api/health', (req, res) => ok(res, { status: 'up', service: 'backend', version: APP_VERSION, time: new Date().toISOString() }));
 app.get('/api/ready', async (req, res) => {
   const { get, DIALECT } = require('./common/db');
   const checks = { db: false, dialect: DIALECT };
@@ -56,7 +58,7 @@ app.get('/api/ready', async (req, res) => {
     ok: ready,
     status: ready ? 'ready' : 'not_ready',
     service: 'backend',
-    version: '8.0.0',
+    version: APP_VERSION,
     checks,
     time: new Date().toISOString(),
   });

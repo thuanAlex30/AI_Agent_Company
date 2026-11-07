@@ -740,5 +740,90 @@ ok(roles.role_scopes && roles.role_scopes.manager && roles.role_scopes.warehouse
   }
 })();
 
+// ===========================================================================
+// 15. PHASE 5 — P1-13: FRONTEND REFRESH QUEUE + CSRF + SCOPE DISPLAY
+// ===========================================================================
+
+// 15.1 — FE api.js: refresh hang doi + CSRF + retry giu Idempotency-Key.
+(function frontendRefreshQueueCheck() {
+  const feApi = read(path.join(ROOT, '..', 'frontend', 'src', 'api.js'));
+  ok(fs.existsSync(path.join(ROOT, '..', 'frontend', 'src', 'api.js')), 'Phase 5: ton tai frontend/src/api.js');
+  if (!feApi) return;
+  ok(/let refreshing = null/.test(feApi), 'Phase 5: co hang doi refresh (refreshing) de chi 1 len refresh chay');
+  ok(/\/api\/auth\/refresh/.test(feApi), 'Phase 5: co goi /api/auth/refresh');
+  ok(/X-CSRF-Token/.test(feApi), 'Phase 5: gui header X-CSRF-Token');
+  ok(/csrf_token/.test(feApi), 'Phase 5: doc cookie csrf_token');
+  ok(/res\.status === 401/.test(feApi) && /tryRefresh\(\)/.test(feApi), 'Phase 5: 401 => refresh roi retry');
+  ok(/_retry/.test(feApi), 'Phase 5: retry co co so (_retry) tranh vong lap');
+  ok(/auth:expired/.test(feApi), 'Phase 5: phat event auth:expired khi refresh that bai');
+  // Thu tu `...opts` PHAI den TRUOC `headers` de khong ghi de header CSRF.
+  // Kiem tra trong ham `api` (tu `export async function api` den het ham).
+  const apiStart = feApi.indexOf('export async function api(');
+  const apiBody = apiStart >= 0 ? feApi.slice(apiStart, apiStart + 1200) : '';
+  const idxOpts = apiBody.indexOf('...opts');
+  const idxHeaders = apiBody.indexOf('headers:');
+  ok(apiStart >= 0 && idxOpts > 0 && idxHeaders > idxOpts, 'Phase 5: ...opts dat truoc headers (khong ghi de CSRF)');
+})();
+
+// 15.2 — FE App.jsx: nghe auth:expired + hien thi scope + version tu /api/health.
+(function frontendAppCheck() {
+  const app = read(path.join(ROOT, '..', 'frontend', 'src', 'App.jsx'));
+  if (!app) { ok(false, 'Phase 5: thieu frontend/src/App.jsx'); return; }
+  ok(/auth:expired/.test(app), 'Phase 5: App.jsx lang nghe auth:expired');
+  ok(/setUser\(null\)/.test(app), 'Phase 5: auth:expired => setUser(null)');
+  ok(/scope/.test(app), 'Phase 5: App.jsx hien thi pham vi scope');
+  ok(/\/api\/health/.test(app), 'Phase 5: version doc tu /api/health (khong hardcode)');
+  const appCode = app.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  ok(!/v6\.1/.test(appCode), 'Phase 5: khong hardcode nhan version trong UI');
+  // canSeeTab phai dung `.every()` (backend can DUONG quyen).
+  ok(/\.every\(\(p\)/.test(app), 'Phase 5: canSeeTab dung every() (khop backend requirePerm)');
+  ok(!/need \|\| \[\]\)\.some\(/.test(app), 'Phase 5: canSeeTab khong con some()');
+})();
+
+// 15.3 — Backend: CSRF guard + refresh route + csrf cookie + version.
+(function backendCsrfRefreshCheck() {
+  const sec = read(path.join(ROOT, 'src/common/security.js'));
+  const authRoute = read(path.join(ROOT, 'src/routes/auth.js'));
+  ok(/function csrfGuard/.test(sec), 'Phase 5: backend co csrfGuard');
+  ok(/X-CSRF-Token|x-csrf-token/.test(sec), 'Phase 5: csrfGuard doc header X-CSRF-Token');
+  ok(/timingSafeEqual/.test(sec), 'Phase 5: csrfGuard so sanh timing-safe');
+  ok(/httpOnly:\s*false/.test(authRoute), 'Phase 5: cookie csrf_token KHONG httpOnly (FE doc duoc)');
+  ok(/csrf_token/.test(authRoute), 'Phase 5: cap csrf_token cookie khi login/refresh');
+  ok(/router\.post\('\/refresh'/.test(authRoute), 'Phase 5: co route POST /api/auth/refresh');
+  ok(/router\.post\('\/logout-all'/.test(authRoute), 'Phase 5: co route POST /api/auth/logout-all');
+  ok(/router\.get\('\/sessions'/.test(authRoute), 'Phase 5: co route GET /api/auth/sessions');
+  ok(/router\.get\('\/me'/.test(authRoute), 'Phase 5: co route GET /api/auth/me (scope cho FE)');
+  // CSRF exempt phai dung /api/auth/login + /api/auth/refresh (FE goi khi chua co token).
+  ok(/\/api\/auth\/login/.test(sec) && /\/api\/auth\/refresh/.test(sec), 'Phase 5: csrfGuard exempt login/refresh');
+})();
+
+// 15.4 — Storefront KHONG duoc dung cookie ERP (public API).
+(function storefrontNoErpCookieCheck() {
+  const filesSf = walk(path.join(ROOT, '..', 'storefront', 'src'));
+  const hits = filesSf.filter((f) => /\.jsx?$/.test(f)).filter((f) => /access_token|refresh_token|credentials:\s*['"]include/.test(read(f)));
+  ok(hits.length === 0, 'Phase 5: storefront khong dung cookie ERP' + (hits.length ? ' (' + hits.map((h) => path.basename(h)).join(', ') + ')' : ''));
+})();
+
+// 15.5 — FE co import CSV phai dung apiUpload (co CSRF) chu khong fetch thu.
+(function frontendUploadCsrfCheck() {
+  const fin = read(path.join(ROOT, '..', 'frontend', 'src', 'tabs', 'FinanceTab.jsx'));
+  ok(/apiUpload/.test(fin), 'Phase 5: import CSV dung apiUpload (kem CSRF)');
+  ok(!/fetch\('\/api\/transactions\/import-csv'/.test(fin), 'Phase 5: khong goi fetch thu cho import CSV (thieu CSRF)');
+  const feApi = read(path.join(ROOT, '..', 'frontend', 'src', 'api.js'));
+  ok(/export async function apiUpload/.test(feApi), 'Phase 5: api.js export apiUpload');
+})();
+
+// 15.6 — Test Phase 5 phai ton tai.
+(function phase5TestCheck() {
+  const t = path.join(ROOT, 'tests', 'phase5.test.js');
+  ok(fs.existsSync(t), 'Phase 5: ton tai suite phase5.test.js');
+  if (fs.existsSync(t)) {
+    const src = read(t);
+    for (const id of ['p501', 'p502', 'p503', 'p504', 'p505', 'p506']) {
+      ok(new RegExp(id + ':').test(src), 'Phase 5: co test ' + id);
+    }
+  }
+})();
+
 console.log(fail === 0 ? '\nVERIFY: ALL PASS' : '\nVERIFY: ' + fail + ' FAIL');
 process.exit(fail === 0 ? 0 : 1);

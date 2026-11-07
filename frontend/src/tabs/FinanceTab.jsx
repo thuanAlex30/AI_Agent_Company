@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, fmtVND, timeLeft, uuid } from '../api.js';
+import { api, apiUpload, fmtVND, timeLeft, uuid } from '../api.js';
 
 export default function FinanceTab({ toast }) {
   const [debts, setDebts] = useState([]);
@@ -21,10 +21,9 @@ export default function FinanceTab({ toast }) {
     if (!f) { toast('Chọn file CSV trước'); return; }
     try {
       const fd = new FormData(); fd.append('file', f);
-      const res = await fetch('/api/transactions/import-csv', { method: 'POST', credentials: 'include', body: fd });
-      const body = await res.json();
-      if (!body.ok) throw new Error(body.error.message);
-      setCsvOut(`Import: ${body.data.imported} / skipped ${body.data.skipped} / total ${body.data.total}`);
+      // Phase 5: dung apiUpload de kem CSRF + refresh + retry.
+      const data = await apiUpload('/api/transactions/import-csv', fd);
+      setCsvOut(`Import: ${data.imported} / skipped ${data.skipped} / total ${data.total}`);
       loadTx();
     } catch (err) { toast(err.message); }
   }

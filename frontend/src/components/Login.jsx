@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../api.js';
+import { api, writeCsrf } from '../api.js';
 
 export default function Login({ onDone, toast }) {
   const [u, setU] = useState('admin');
@@ -7,7 +7,10 @@ export default function Login({ onDone, toast }) {
   async function submit() {
     if (!u.trim() || !p) { toast('Nhập đủ username + password'); return; }
     try {
-      await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: u.trim(), password: p }) });
+      // Phase 5: luu csrf_token tu response vao cookie de FE doc duoc
+      // va gui header X-CSRF-Token cho cac request sau.
+      const out = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: u.trim(), password: p }) });
+      if (out && out.csrf_token) writeCsrf(out.csrf_token);
       onDone();
     } catch (e) { toast('Login lỗi: ' + e.message); }
   }
