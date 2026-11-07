@@ -54,9 +54,14 @@ test('appr3: PO chua duyet -> receivePO bi chan APPROVAL_REQUIRED', async () => 
 test('appr4: contract >=50tr can ca ceo + legal moi signed', async () => {
   const cust = await get("SELECT * FROM customers WHERE code='KH001'");
   const code = `HDA-${S}`;
-  await run('INSERT INTO contracts(code,customer_id,amount,status,created_by) VALUES(?,?,?,\'pending_approval\',\'test\')', [code, cust.id, 60000000]);
+  // BUG (PG-DB-04): `created_by` la cot BIGINT (ID nguoi). Truoc day test ghi
+  // LITERAL 'test' => SQLite ghi tam chuoi vao cot BIGINT (du lieu sai, im
+  // lang), PostgreSQL nem loi "invalid input syntax for type bigint".
+  // => dung ID nguoi THAT (admin.id).
+  const admin0 = await get("SELECT * FROM users WHERE username='admin'");
+  await run('INSERT INTO contracts(code,customer_id,amount,status,created_by) VALUES(?,?,?,\'pending_approval\',?)', [code, cust.id, 60000000, admin0.id]);
   const ct = await get('SELECT * FROM contracts WHERE code=?', [code]);
-  const admin = await get("SELECT * FROM users WHERE username='admin'");
+  const admin = admin0;
   const mgr = await ensureUser('mgr_test', 'manager', 'MM001');
   // manager request 2 buoc: ceo + legal
   const a1 = await gov.requestApproval(null, { ref_type: 'contract', ref_id: ct.id, requester: mgr.id, level: 'ceo' });

@@ -27,11 +27,15 @@ router.post('/products', requirePerm('products.write'), async (req, res) => {
     const cost = reqIntPos(req.body, 'cost');
     // P1-14: tx + audit (INV-2: audit phai cung tx voi du lieu nghiep vu).
     const out = await tx(async (c) => {
+      // BUG (PG-DB-01): `products` khoa chinh la `sku` (TEXT), KHONG co cot `id`.
+      // `insertedId()` se nem loi fail-fast tren PG (adapter tra null vi
+      // `RETURNING id` khong ap dung) => route 500 khong tao duoc san pham.
+      // Dinh danh cua ban ghi la `sku` => dung `sku` lam record_id cho audit.
       const r = await c.run('INSERT INTO products(sku,name,price,cost) VALUES(?,?,?,?)', [sku, name, price, cost]);
-      const id = insertedId(r, 'products');
+      if (!r.changes) throw new AppError('VALIDATION', 'Khong tao duoc san pham', 400);
       const { writeAudit } = require('../common/audit');
-      await writeAudit(c, req.user.username, 'create', 'products', id, null, { sku, name, price, cost });
-      return { id, sku };
+      await writeAudit(c, req.user.username, 'create', 'products', sku, null, { sku, name, price, cost });
+      return { id: sku, sku };
     });
     return ok(res, out);
   } catch (e) { return fail(res, e); }

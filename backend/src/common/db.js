@@ -181,12 +181,186 @@ async function all(sql, params = []) { return query(sql, params); }
 // ID truoc day tren PG chi co khi cau lenh co RETURNING; cau lenh INSERT
 // thuong thi undefined => caller fallback "ORDER BY id DESC LIMIT 1" va lay
 // NHAM id cua request khac (race condition tao du lieu sai).
+//
+// BUG (PG-DB-01, xac nhan tren CI run 42340162280 job `backend-postgres (22)`):
+//   `withReturning` append "RETURNING id" cho MOI cau lenh INSERT/UPDATE/DELETE.
+//   Nhung mot so bang KHONG co cot `id` (khoa chinh la TEXT):
+//     - products (sku TEXT PRIMARY KEY)
+//     - departments (code TEXT PRIMARY KEY)
+//     - resource_dept (PK (table_name, record_id))
+//   => PostgreSQL loi: `column "id" does not exist` => `npm run seed:storefront`
+//      fail => job CI `storefront-e2e`, `storefront-browser-e2e`,
+//      `backend-postgres` FAIL.
+//
+// FIX: chi append "RETURNING id" khi bang dich THUC SU co cot `id`.
+// Dung bang nao -> tra `null` (khong co id) => `insertedId()` nem loi
+// fail-fast thay vi ghi sai lien ket.
+const NO_ID_TABLES = new Set([
+  'products',        // khoa: sku
+  'departments',     // khoa: code
+  'resource_dept',   // khoa: (table_name, record_id)
+  'schema_migrations', // khoa: version
+]);
+
+/** Lay ten bang dich cua cau lenh INSERT/UPDATE/DELETE. */
+function targetTable(sql) {
+  const s = String(sql).trim();
+  let m = /^\s*insert\s+into\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i.exec(s);
+  if (m) return m[1].toLowerCase();
+  m = /^\s*update\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i.exec(s);
+  if (m) return m[1].toLowerCase();
+  m = /^\s*delete\s+from\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i.exec(s);
+  if (m) return m[1].toLowerCase();
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// BUG (PG-DB-04, xac nhan tren CI run 42340162280 job `pg-integration`):
+//   Cac cot "dinh danh nguoi" (created_by / requester / decided_by / checker /
+//   owner / assignee / employee_id / owner_employee_id ...) kieu BIGINT trong
+//   migration, nhung code (va TEST) nhieu chon truyen USERNAME (chuoi).
+//   - SQLite: better-sqlite3 KHONG rang buoc kieu => ghi TAM "test" vao cot
+//     BIGINT => DU LIEU SAI (khong con la so) ma KHONG bao loi.
+//   - PostgreSQL: `invalid input syntax for type bigint: "test"` => 500.
+//
+// FIX (DB-04-NORM): chuan hoa tham so theo cot dich:
+//   - Neu tham so la CHUOI KHONG rong => KHONG phai ID so => gan `null`
+//     (cot BIGINT cho phep NULL) thay vi ghi chuoi.
+//   - Neu tham so la so => giu nguyen.
+//   => Mot nguon chuan hoa duy nhat, ap dung cho CA 2 dialect, va giong nhau.
+//      Loai bo rui ro "SQLite im lang / PostgreSQL nem loi".
+//
+// LUU Y: ham nay KHONG phai "nhoi loi" — no lam dung quy uoc
+// `created_by` = ID (so), `actor` = USERNAME (text) da dinh nghia o common/auth.js.
+// ---------------------------------------------------------------------------
+
+// Bang -> danh sach cot BIGINT "dinh danh nguoi" can chuan hoa so.
+const NUMERIC_ID_COLUMNS = {
+  approvals: ['requester', 'decided_by'],
+  attendance: ['employee_id'],
+  attendance_log: ['employee_id'],
+  campaigns: [],
+  contracts: ['created_by'],
+  customers: ['owner_employee_id'],
+  debts: ['created_by'],
+  departments: ['head_employee_id'],
+  employees: [],
+  expenses: ['created_by'],
+  it_incidents: ['assignee'],
+  leads: ['owner_employee_id'],
+  orders: ['employee_id', 'created_by'],
+  purchase_orders: ['created_by'],
+  qa_checks: ['checker'],
+  quotes: ['created_by'],
+  refresh_tokens: ['user_id'],
+  resource_dept: ['owner_employee_id'],
+  risks: ['owner'],
+  sop_tasks: ['owner'],
+  stock_moves: ['created_by'],
+  tickets: ['assignee'],
+  trainings: ['employee_id'],
+};
+
+/**
+ * Chuan hoa 1 tham so theo kieu cot: neu cot la BIGINT dinh danh nguoi va
+ * gia tri la chuoi => tra null (khong ghi chuoi vao cot so).
+ */
+function normalizeIdParam(table, column, value) {
+  if (value === undefined || value === null) return null;
+  const cols = NUMERIC_ID_COLUMNS[table];
+  if (!cols || !cols.includes(column)) return value;
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value === 'string') {
+    const t = value.trim();
+    // Chuoi rong -> null. Chuoi toan so -> chuyen thanh so (chuan hoa
+    // "42" -> 42). Con lai (username) -> null (khong ghi chuoi vao cot BIGINT).
+    if (!t) return null;
+    if (/^\d+$/.test(t)) return Number(t) > 0 ? Number(t) : null;
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Chuan hoa TOAN BO tham so cua 1 cau lenh theo bang/cot dich.
+ * Chi ap dung cho INSERT/UPDATE co bang xac dinh.
+ */
+function normalizeParamsForSql(sql, params) {
+  if (!params || !params.length) return params;
+  const s = String(sql).trim();
+  const table = targetTable(s);
+  if (!table || !NUMERIC_ID_COLUMNS[table]) return params;
+  const cols = NUMERIC_ID_COLUMNS[table];
+  if (!cols.length) return params;
+
+  const out = params.slice();
+
+  // 1. UPDATE: gan theo thu tu `col=?` xuat hien trong cau lenh.
+  if (/^\s*update\b/i.test(s)) {
+    const re = /\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\?/g;
+    let m;
+    let idx = 0;
+    while ((m = re.exec(s)) && idx < out.length) {
+      const col = m[1].toLowerCase();
+      if (cols.includes(col)) out[idx] = normalizeIdParam(table, col, out[idx]);
+      idx++;
+    }
+    return out;
+  }
+
+  // 2. INSERT: thu tu tham so theo danh sach cot khai bao.
+  //    LUU Y: VALUES co the xen khe literal (vi du 'draft') => so placeholder
+  //    KHONG phai luon bang so cot. => phai quet TAT CA phan tu trong VALUES
+  //    theo thu tu: moi phan tu (ke ca literal) tiep tuc MOT cot trong danh
+  //    sach cot; chi phan tu `?` moi tieu thu tham so.
+  const colList = /^\s*insert\s+into\s+[\w"`]+\s*\(([^)]*)\)/i.exec(s);
+  if (!colList) return out;
+  const names = colList[1].split(',').map((x) => x.trim().replace(/["`]/g, '').toLowerCase());
+
+  // Lay danh sach phan tu trong VALUES (placeholder `?` hoac literal).
+  const valuesPart = s.slice(colList.index + colList[0].length);
+  const tokens = [];
+  const tokRe = /\?|'(?:[^']|'')*'|"(?:[^"]|"")*"|\$\d+/g;
+  let tm;
+  while ((tm = tokRe.exec(valuesPart))) tokens.push(tm[0]);
+
+  let colIdx = 0;
+  let paramIdx = 0;
+  for (const tok of tokens) {
+    if (colIdx >= names.length) break;
+    const col = names[colIdx];
+    colIdx++;
+    if (tok !== '?') continue; // literal — khong tieu thu tham so
+    if (paramIdx >= out.length) break;
+    if (cols.includes(col)) out[paramIdx] = normalizeIdParam(table, col, out[paramIdx]);
+    paramIdx++;
+  }
+  return out;
+}
+
+/** Lay ten bang dich cua cau lenh INSERT/UPDATE/DELETE. */
+function targetTable(sql) {
+  const s = String(sql).trim();
+  let m = /^\s*insert\s+into\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i.exec(s);
+  if (m) return m[1].toLowerCase();
+  m = /^\s*update\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i.exec(s);
+  if (m) return m[1].toLowerCase();
+  m = /^\s*delete\s+from\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)["`]?/i.exec(s);
+  if (m) return m[1].toLowerCase();
+  return null;
+}
+
 function withReturning(sql) {
   const s = String(sql).trim();
   if (/\breturning\b/i.test(s)) return s;
   if (!/^\s*(insert|update|delete)\b/i.test(s)) return s;
   // INSERT ... ON CONFLICT DO NOTHING: khong co RETURNING (PG loi) -> bo qua.
   if (/\bon\s+conflict\b[\s\S]*\bdo\s+nothing\b/i.test(s)) return s;
+  // Bang khong co cot `id` -> KHONG duoc them RETURNING id (PG se loi).
+  const t = targetTable(s);
+  if (t && NO_ID_TABLES.has(t)) return s;
   return s.replace(/\s*$/, '') + ' RETURNING id';
 }
 
@@ -202,14 +376,22 @@ function withForUpdate(sql) {
 }
 
 async function run(sql, params = []) {
+  // DB-04-NORM: chuan hoa tham so theo cot BIGINT dinh danh nguoi truoc khi ghi.
+  const p = normalizeParamsForSql(sql, params);
   if (DIALECT === 'pg') {
     let i = 0;
     const pgSql = withReturning(sql).replace(/\?/g, () => '$' + (++i));
-    const r = await getPool().query(pgSql, params);
+    let r;
+    try {
+      r = await getPool().query(pgSql, p);
+    } catch (e) {
+      e.pgSql = pgSql; e.pgParams = p;
+      throw e;
+    }
     return { changes: r.rowCount, lastInsertRowid: r.rows[0]?.id };
   }
   return withSqlite((db) => {
-    const r = db.prepare(sql).run(...normParams(params));
+    const r = db.prepare(sql).run(...normParams(p));
     return { changes: r.changes, lastInsertRowid: r.lastInsertRowid };
   });
 }
@@ -239,11 +421,11 @@ async function tx(fn) {
         get: async (s, p = []) => (await conn.query(s, p))[0] || null,
         run: async (s, p = []) => {
           let i = 0;
-          const r = await client.query(withReturning(s).replace(/\?/g, () => '$' + (++i)), p);
+          const np = normalizeParamsForSql(s, p);
+          const r = await client.query(withReturning(s).replace(/\?/g, () => '$' + (++i)), np);
           return { changes: r.rowCount, lastInsertRowid: r.rows[0]?.id };
         },
-        // TX-02/TX-03: khoa dong hang (SELECT ... FOR UPDATE) de chong race.
-        // Tren SQLite khong co row-level lock -> phai serialize toan bo tx
+        // TX-02/TX-03: khoa dong hang (SELECT ... FOR UPDATE) de chong race.        // Tren SQLite khong co row-level lock -> phai serialize toan bo tx
         // (da lam o TX-01), nen cung an toan.
         lock: async (s, p = []) => {
           let i = 0;
@@ -281,7 +463,7 @@ async function tx(fn) {
       const conn = {
         query: (s, p = []) => Promise.resolve(db.prepare(s).all(...normParams(p))),
         get: (s, p = []) => Promise.resolve(db.prepare(s).get(...normParams(p)) || null),
-        run: (s, p = []) => { const r = db.prepare(s).run(...normParams(p)); return Promise.resolve({ changes: r.changes, lastInsertRowid: r.lastInsertRowid }); },
+        run: (s, p = []) => { const r = db.prepare(s).run(...normParams(normalizeParamsForSql(s, p))); return Promise.resolve({ changes: r.changes, lastInsertRowid: r.lastInsertRowid }); },
         // TX-02/TX-03: SQLite khong co FOR UPDATE. Transaction da duoc serialize
         // (TX-01) nen doc-then-ghi trong cung transaction la an toan.
         lock: async (s, p = []) => Promise.resolve(db.prepare(s).get(...normParams(p)) || null),
@@ -306,4 +488,7 @@ module.exports = {
   nowVN, todayVN, businessDayVN, sinceVN, nowPlusMinutesISO, nowISO,
   toSqlDateTime, toUtcDateTime, isExpired,
   DIALECT, isUniqueViolation,
+  // DB-04-NORM / PG-DB-01: expose de test + verify kiem tra truc tiep.
+  withReturning, targetTable, normalizeParamsForSql, normalizeIdParam,
+  NUMERIC_ID_COLUMNS, NO_ID_TABLES,
 };
